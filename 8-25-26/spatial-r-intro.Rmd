@@ -1,0 +1,220 @@
+---
+title: "Spatial-R-intro"
+author: "Aaron_Siegle"
+date: "2026-08-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+#############################################################
+# Using the sf package
+library(sp) # for meuse data
+library(sf)
+data(meuse)
+```
+
+```{r}
+# meuse_crs <- "+init=epsg:28992"
+meuse <- st_as_sf(meuse, coords=c("x", "y"), crs = st_crs("EPSG:28992"))
+st_crs(meuse)
+rm(meuse)
+data(meuse)
+class(meuse)
+meuse <- st_as_sf(meuse, coords=c("x", "y"))
+st_crs(meuse)
+meuse <- st_set_crs(meuse, st_crs("EPSG:28992"))
+# sometimes data does not have a spatial component - that is why you set the CRS 
+st_crs(meuse)
+summary(meuse) # these are data.frames!
+names(meuse)
+plot(meuse)
+plot(meuse["zinc"]) # make a plot of just zinc
+```
+
+
+```{r}
+# the geometry - the geometry is what makes the spatial data an sf object
+st_geometry(meuse)
+st_crs(meuse)
+# st_set_crs(meuse) <- "4326" # Doesn't reproject - does not reproject the points 
+# reprojecting the data so that all the data is in the same projection 
+meuse_wgs84 <- st_transform(meuse, st_crs("EPSG:4326")) # project to WGS84, EPSG:4326
+# makes the points actually lat long data 
+st_geometry(meuse_wgs84)
+```
+```{r}
+#############################################################
+# now lets read in an ESRI shapefile
+nc <- st_read(system.file("shape/nc.shp", package="sf"))
+nc[order(nc$AREA, decreasing=TRUE), c("AREA", "NAME")]
+st_geometry(nc)
+names(nc)
+```
+```{r}
+# let's map the SIDs incidence - SID is sudden infant death syndome - just raw numbers, not a porportion
+plot(nc["SID79"])
+```
+```{r}
+# create a new column for SID rate
+nc$SID79r <- nc$SID79 / nc$BIR79
+plot(nc[c("SID79", "SID79r")])
+```
+```{r}
+library(viridis)
+plot(nc["SID79r"], pal=inferno, breaks=c(0,0.003))
+qs <- quantile(as.numeric(unlist(nc$SID79r)), c(0, 0.02, 0.98, 1))
+breaks <- c(qs[1], seq(qs[2], qs[3], len)
+```
+
+```{r}
+library(RColorBrewer)
+display.brewer.all()
+mybrewerpal <- colorRampPalette(brewer.pal(9, "Blues"))
+plot(nc["SID79r"], breaks="fisher", pal=mybrewerpal)
+```
+```{r}
+#############################################################
+#############################################################
+# Solutions to lecture challenge
+# 1) Which NC county has highest area?
+nc[order(nc$AREA, decreasing=TRUE), "NAME"][1,] # by sorting
+nc[which.max(nc$AREA), "NAME"] # with filtering
+```
+```{r}
+# 2) What is the FIPS code for Wake County
+nc[nc$NAME == "Wake", "FIPS"]
+```
+```{r}
+# 3) Make a map of NC counties colorized by FIPS code
+plot(nc["FIPS"]) # FIPS is character and so treated as a factor, so we get discrete colors
+# compare to numeric:
+nc$FIPSnum <- as.numeric(nc$FIPS)
+plot(nc["FIPSnum"]) # now we get a continuous color ramp
+```
+```{r}
+# 4) Create a simple feature collection of 1000 random points...
+n <- 1000
+knids <- data.frame(x=runif(n, 0, 360), y=runif(n, 0, 90), elev=rnorm(n, 100, 25), soil=sample(LETTERS[1:3], n, rep=T), foundknid=sample(c(TRUE, FALSE), n, rep=T))
+knids <- st_as_sf(knids, coords=c("x", "y"), crs=st_crs("EPSG:4326"))
+plot(knids)
+```
+```{r}
+#############################################################
+# Using the raster package
+library(raster)
+library(viridis)
+```
+path_to_data <- "/Users/jmgray2/Google Drive/My Drive/Teaching/GIS713/GDM_RCodeData"
+setwd(path_to_data)
+
+r <- raster("kansas_sub")
+class(r)
+projection(r)
+ncell(r)
+xres(r)
+extent(r)
+plot(r)
+click(r)
+click(r, cell=T, xy=T, type="p")
+zoom(r)
+v <- values(r) # extract values to a data.frame
+
+s <- stack("kansas_sub")
+nlayers(s)
+v <- values(s)
+dim(v)
+head(v)
+plot(s)
+plot(s, 4)
+plotRGB(s, 4, 3, 2)
+plotRGB(s, 4, 3, 2, stretch="lin")
+?plotRGB
+
+qs <- quantile(raster(s, 4), c(0, 0.02, 0.98, 1))
+breaks <- unique(c(qs[1], seq(qs[2], qs[3], len=254), qs[4]))
+pal <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+plot(raster(s, 4), breaks=breaks, col=pal(length(breaks) - 1))
+
+# or, using viridis
+plot(raster(s, 4), breaks=breaks, col=plasma(length(breaks) - 1))
+
+# creating new rasters
+r <- raster(matrix(rnorm(100), nrow=10, ncol=10))
+plot(r)
+# various ways to set the values
+r[] <- 10 # using bracket style
+r <- setValues(r, rnorm(100, mean=10, sd=0.2)) # using the setValues function
+r[sample(1:ncell(r), 10)] <- NA # using particular cell numbers
+plot(r, colNA="black")
+r[1,] <- 10 # set an entire row
+values(r) <- 1:ncell(r) # using the values function; fills by row
+
+# extracting values via points using sampleRandom
+r_samp <- sampleRandom(r, 10, sp=T)
+r_samp@data
+spplot(r_samp)
+plot(r)
+plot(r_samp, add=T)
+
+# or, from some other dataset
+set.seed(42)
+r <- raster("kansas_sub", 4)
+cdl <- raster("kansas_sub_2011_CDL.tif")
+plot(cdl)
+
+# create a random sample as a SpatialPointsDataFrame
+num_samples <- 100
+x_samp <- sample(xmin(r):xmax(r), num_samples, rep=T)
+y_samp <- sample(ymin(r):ymax(r), num_samples, rep=T)
+samp_df <- data.frame(x=x_samp, y=y_samp, index=1:num_samples)
+coordinates(samp_df) <- ~ x + y
+plot(r)
+plot(samp_df, add=T, pch=1, col="black")
+
+# extract the Landsat NIR values and the CDL codes at sample points
+samp_df$nir <- extract(r, samp_df)
+samp_df$cdl <- extract(cdl, samp_df)
+head(samp_df)
+boxplot(nir~cdl, data=samp_df)
+
+# get the colors from the CDL color table, and boxplot with proper colors
+boxplot(nir~cdl, data=samp_df, col=colortable(cdl)[sort(unique(samp_df$cdl)) + 1])
+
+# extract values using a polygon
+r_qs <- quantile(r, c(0, 0.02, 0.98, 1))
+breaks <- c(r_qs[1], seq(r_qs[2], r_qs[3], len=254), r_qs[4])
+plot(r, breaks=breaks, col=viridis(255))
+
+samp_poly <- drawPoly()
+poly_extract <- extract(r, samp_poly)
+class(poly_extract)
+# names(poly_extract)
+length(poly_extract[[1]])
+hist(poly_extract[[1]])
+extract(r, samp_poly, fun=mean)
+extract(r, samp_poly, fun=range)
+myf <- function(x, na.rm=T) median(x, na.rm=na.rm) - mean(x, na.rm=na.rm)
+extract(r, samp_poly, fun=myf)
