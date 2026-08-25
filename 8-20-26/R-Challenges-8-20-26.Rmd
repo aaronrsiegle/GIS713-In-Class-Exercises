@@ -28,3 +28,158 @@ plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+colA <- sample(1:100, 300, rep=T)
+colB <- sample(1:100, 300, rep=T)
+colC <- sample(1:100, 300, rep=T)
+my_df <- as.data.frame(cbind(colA, colB, colC))
+head(my_df)
+```
+```{r}
+#alternative way to do the same thing as above 
+n <- 100
+df <- data.frame(a=rnorm(n), b=rnorm(n), c=rnorm(n))
+head(df)
+```
+```{r}
+##Setting the seed 
+set.seed(42)
+sample(letters, 5)
+```
+
+
+```{r}
+colA <- sample(1:100, 300, rep=T)
+colB <- sample(1:100, 300, rep=T)
+colC <- sample(1:100, 300, rep=T)
+my_df <- as.data.frame(cbind(colA, colB, colC))
+head(my_df)
+```
+
+
+```{R data table file}
+
+library(data.table)
+data_url <- "https://goo.gl/uQguPg"
+system.time(nycflights <- fread(data_url))
+# user  system elapsed
+#   0.372   0.092   1.250
+```
+
+```{}
+# fread is much faster than read.table, and gets faster as the data get bigger
+system.time(trash <- read.table(data_url, sep=",", head=T))
+# user  system elapsed
+#   1.595   0.136   4.239
+```
+
+# the print() method works better than for data.frames too!
+nycflights
+class(nycflights)
+
+# simple subsetting, note that we can refer to variables by name
+# no need to use nycflights$origin or nycflights$month (but that would work)
+# also don't need the comma like w/ data.frames (though that'd be fine!)
+nycflights[origin == "JFK" & month == 6L] # all flights originating at JFK in June
+nycflights[10:15] # rows 10 through 15
+
+# order by origin in ascending order and then month in descending order
+# note we can use "-" to get descending order on month
+# order() actually uses forder() which is faster than base::order()
+nycflights[order(origin, -month)]
+
+# get the month variable as a vector
+tmp <- nycflights[, month]
+class(tmp)
+
+# get the month variable as a data.table
+nycflights[, .(month)]
+nycflights[, list(month)] # same thing
+class(tmp)
+
+# get month and origin as a data.table
+# note that we can use .() instead of list(), they mean the same thing for DT
+tmp <- nycflights[, .(month, origin)]
+
+# another DT with a few columns, this time with two of the three renamed
+tmp <- nycflights[, .(airline = carrier, tailnumber = tailnum, origin)]
+
+# .N is a special n
+
+# .N is a code for "the number of rows in the DT"
+# compute number of flights with no arrival or departure delay
+nycflights[, sum(arr_delay <= 0 & dep_delay <= 0)]
+nycflights[arr_delay <= 0 & dep_delay <= 0, .N] # alternative method
+# fraction of flights had no delays:
+nycflights[, sum(arr_delay <= 0 & dep_delay <= 0) / .N]
+nycflights[, sum(arr_delay <= 0 & dep_delay <= 0) / nrow(nycflights)] # same same
+
+# putting it together: compute average arrival and departure delay for all flights
+# leaving JFK in June
+nycflights[origin == "JFK" & month == 6L, .(mean_arr_delay=mean(arr_delay), mean_dep_delay=mean(dep_delay))]
+
+# how many flights left JFK in June?
+nycflights[origin == "JFK" & month == 6L, .N]
+
+# these are the same, but "with=FALSE" allows you to use data.frame style
+nycflights[, .(arr_delay, dep_delay)]
+nycflights[, c("arr_delay", "dep_delay"), with=FALSE]
+
+# using by
+# how many flights from each origin airport?
+nycflights[, .N, by=origin]
+# nrow(nycflights[origin == "JFK"])
+# nrow(nycflights[origin == "EWR"])
+# nrow(nycflights[origin == "LGA"])
+
+# number of June flights and mean departure delay by origin airport
+nycflights[month == 6L, .(.N, mean(dep_delay)), by=origin]
+nycflights[month == 6, .(.N, mean(dep_delay)), by=origin]
+
+# mean arrival delay by month
+nycflights[, .(mean(dep_delay)), by=month]
+plot(nycflights[, .(mean_dep_delay=mean(dep_delay)), by=month], pch=16, cex=2, col="tomato")
+
+# total number of trips by American Airlines for each origin-dest pair
+nycflights[carrier == "AA", .N, by=.(origin, dest)]
+
+# mean departure and arrival delays for AA by origin, dest, month
+nycflights[carrier == "AA", .(mean(dep_delay), mean(arr_delay)), by=.(origin, dest, month)]
+
+# chaining: number of AA flights by origin and destination, ordered by inc(origin) and dec(dest)
+nycflights[carrier == "AA", .N, by=.(origin, dest)][order(origin, -dest)]
+# DT[i1, j1, by1][i2, j2, by2]
+
+# by can also accept expressions!
+# number of flights that departed/arrived early/late
+nycflights[, .N, by=.(dep_delay > 0, arr_delay > 0)]
+
+# using .SD and .SDcols
+# compute the mean of ALL columns for AA for each origin-destination pair
+
+nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest)]
+nycflights[carrier == "AA", lapply(.SD, base::mean), by=.(origin, dest)]
+
+# do it again, but just the means for arr_delay, dep_delay, and distance
+nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest), .SDcols=c("arr_delay", "dep_delay", "distance")]
+# nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest), .SDcols=c(arr_delay, dep_delay, distance)]
+
+# calculating new variables in place
+names(nycflights)
+nycflights[, total_delay := arr_delay + dep_delay]
+nycflights[, .(avg_speed = distance / air_time)] # this doesn't create a variable, but it does calculate it!
+nycflights[, avg_speed := distance / air_time]
+
+# a more advanced example
+LinearSlope <- function(x, y){
+  lm1 <- lm(y ~ x)
+  return(summary(lm1)$r.squared)
+}
+
+# how much variation in air_time does distance explain for each carrier?
+nycflights[, .(speed_corr=LinearSlope(air_time, distance)), by=carrier][order(speed_corr)]
+# note the difference here, adding that variable preserves the size of the data.table
+# so we end up repeating a lot of the values of speed_corr
+nycflights[, speed_corr := LinearSlope(air_time, distance), by=carrier]
+
+```

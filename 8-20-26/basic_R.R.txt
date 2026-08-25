@@ -3,7 +3,6 @@
 
 # can be a simple calculator
 
-
 pi * 10
 log(1)
 2^4
