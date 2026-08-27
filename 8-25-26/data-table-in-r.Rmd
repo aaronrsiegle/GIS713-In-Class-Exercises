@@ -167,30 +167,52 @@ nycflights[carrier == "AA", .N, by=.(origin, dest)][order(origin, -dest)]
 nycflights[, .N, by=.(dep_delay > 0, arr_delay > 0)]
 ```
 
+```{r}
 # using .SD and .SDcols
 # compute the mean of ALL columns for AA for each origin-destination pair
 
-nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest)]
-nycflights[carrier == "AA", lapply(.SD, base::mean), by=.(origin, dest)]
+nycflights[carrier == "AA", lapply(.SD, .mean, by=.(origin, dest)]
+```
 
+```{r}
+# fixing the error that was thrown above by reverting to base R 
+nycflights[carrier == "AA", lapply(.SD, base::mean), by=.(origin, dest)]
+```
+
+```{r}
 # do it again, but just the means for arr_delay, dep_delay, and distance
 nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest), .SDcols=c("arr_delay", "dep_delay", "distance")]
-# nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest), .SDcols=c(arr_delay, dep_delay, distance)]
 
+# nycflights[carrier == "AA", lapply(.SD, mean), by=.(origin, dest), .SDcols=c(arr_delay, dep_delay, distance)]4
+```
+
+```{r}
 # calculating new variables in place
 names(nycflights)
 nycflights[, total_delay := arr_delay + dep_delay]
 nycflights[, .(avg_speed = distance / air_time)] # this doesn't create a variable, but it does calculate it!
 nycflights[, avg_speed := distance / air_time]
+```
 
+```{r}
+# this will be more helpful for hw #1 
 # a more advanced example
+# going to return the coefficient of determination 
+# defining your own function called linear slope to apply below 
 LinearSlope <- function(x, y){
   lm1 <- lm(y ~ x)
   return(summary(lm1)$r.squared)
 }
+```
 
+```{r}
 # how much variation in air_time does distance explain for each carrier?
+# the comma at the beginning means that we are looking at every single row, no filtering 
+# this creates a new data table with the results 
 nycflights[, .(speed_corr=LinearSlope(air_time, distance)), by=carrier][order(speed_corr)]
 # note the difference here, adding that variable preserves the size of the data.table
 # so we end up repeating a lot of the values of speed_corr
+# two different ways of doing the same thing - this one adds the new data to the existing data table
 nycflights[, speed_corr := LinearSlope(air_time, distance), by=carrier]
+```
+
