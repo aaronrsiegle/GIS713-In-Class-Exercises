@@ -28,3 +28,146 @@ plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+```{r}
+# abbreviated sf example, intention is to demonstrate merging w/ other data
+# and simple chloropleth mapping
+
+install.packages("viridis")
+library(sf)
+library(data.table)
+library(viridis) # for nice colors
+```
+```{r}
+# sf comes with some example data, including a North Carolina
+# county shapefile.
+nc <- st_read(system.file("shape/nc.shp", package="sf"))
+class(nc)
+names(nc)
+```
+```{r}
+# calculate a new numeric variable: perim:area ratio
+nc$PAratio <- nc$PERIMETER / nc$AREA
+hist(nc$PAratio)
+```
+
+```{r}
+# let's make a plot of NC counties
+plot(nc[1])
+# only pulls out the column without the geometry - loses it spatial information
+plot(nc$AREA)
+```
+```{r}
+# now colored by P:A
+plot(nc[16])
+```
+```{r}
+# finer control of colors
+?sf::plot
+```
+
+```{r}
+# from classIntervals package
+# GIS functionality for defining color breaks 
+# style: "fixed", "sd", "equal", "pretty", "quantile", "kmeans", "hclust", "bclust", "fisher", "jenks", "dpih", "headtails", or "maximum"
+plot(nc[16], breaks="fisher")
+plot(nc["PAratio"], breaks="kmeans", pal=colorRampPalette(magma(10)), border="white", key.pos=4, axes=T)
+```
+```{r}
+#####################
+# Lets practice merging sf objects with some other data source
+
+# simple example w/ fake data.table, here we join a new data.table
+# with the nc sf object based on county FIPS code. The new data.table
+# contains a plotting color and random numeric value for 20 random
+# counties.
+unique_FIPS <- unique(nc$FIPS)
+# sample 20 of the FIPS code without replacement - random sampling 
+DF <- data.table(FIPS=sample(unique_FIPS, 20), plotcol=sample(viridis(20)), NewValue=rnorm(20))
+nc <- merge(nc, DF, by="FIPS", all.x=TRUE)
+# only the 20 columns that select have the colorised column full - the 20 we selected 
+plot(nc[,1], col=nc$plotcol)
+nc[is.na(nc$plotcol), ]$plotcol <- "grey"
+plot(nc[,1], col=nc$plotcol)
+nc[!is.na(nc$NewValue), c("NAME", "plotcol")]
+```
+
+```{r}
+#############################
+# And now with some actual data
+# load some NASS data about NC tobacco production in 2017
+# It originally fails to upload because there is no way to define the columns
+tobacco <- read.table("~/Downloads/NC_tobacco_2017.csv")
+?read.table
+```
+
+
+```{r}
+# ok, let's define the separator, strip white space, make sure it knows there's a header, and take care of quoting
+tobacco <- read.table("~/Data/NC_tobacco_2017.csv", sep=",", quote="\"", strip.white=TRUE, head=T)
+names(tobacco)
+tobacco[1,]
+```
+```{r}
+# is there an easier way?
+tobacco <- fread("~/Data/NC_tobacco_2017.csv")
+tobacco[1,]
+names(tobacco)
+?fread
+tobacco <- fread("~/Data/NC_tobacco_2017.csv", check.names=T)
+names(tobacco)
+```
+
+```{r}
+# What's in these data?
+# This is very important for HW 1 
+tobacco[, lapply(.SD, unique), .SDcols=c("Year", "State", "Geo.Level", "Ag.District")]
+tobacco[, unique(Commodity)]
+# the data is not tidy - it is in long form - read the line below 
+tobacco[, unique(Data.Item)]
+tobacco[, unique(Domain)]
+tobacco[, .N, by=.(Data.Item, Domain)]
+# Pulling out one unique tobacco item 
+tobacco[Data.Item == "TOBACCO - PRODUCTION, MEASURED IN LB"]
+# verify this gets us down to ONE VALUE PER COUNTY!
+# run this first on your hw to make sure that you are getting one record for one item for one county for one year 
+tobacco[Data.Item == "TOBACCO - PRODUCTION, MEASURED IN LB", .N, by="County"][, max(N)]
+# now subset to a smaller table
+tobacco <- subset(tobacco, Data.Item == "TOBACCO - PRODUCTION, MEASURED IN LB")
+```
+
+```{r}
+# we have an issue with the Value column
+tobacco[1:25, Value]
+as.numeric(tobacco[1:25, Value])
+```
+
+```{r}
+as.numeric(tobacco[1:25, gsub(",", "", Value)]) # this is what we want
+tobacco[, Value := as.numeric(gsub(",", "", Value))] # so we calculate in place over all the data
+tobacco[1:25, Value]
+hist(tobacco[, Value])
+```
+```{r}
+# let's merge w/ the NC county and map production
+# first, we need a merging column
+names(nc)
+# looking at what the FIPs code is
+nc$FIPS[1:10]
+# looking for a join key in the tobacco dataset
+names(tobacco)
+# the fips code is located in two different columns 
+tobacco[1:10, .(State.ANSI, County.ANSI)]
+# paste them together to make a new column called "FIPS" in tobacco
+tobacco[, FIPS := paste(State.ANSI, formatC(County.ANSI, width="3", flag="0"), sep="")]
+```
+
+
+```{r}
+# let's plot by tobacco production
+# nc needs to be first so that the joined dataset with be a spatial dataset
+nc <- merge(nc, tobacco, by="FIPS", all.x=T)
+plot(nc["Value"])
+plot(nc["Value"], breaks="jenks", key.pos=4, axes=T, main="Tobacco Production 2017 (lb)")
+```
