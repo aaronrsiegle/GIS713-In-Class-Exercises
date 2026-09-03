@@ -1,0 +1,148 @@
+---
+title: "Basis PPA in R"
+author: "Aaron_Siegle"
+date: "2026-09-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# Basic PPA in R using spatstat
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# library(RColorBrewer)
+library(sf)
+library(spatstat)
+```
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# siumulate three different point patterns
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+set.seed(42)
+num_points <- 150
+yrange <- xrange <- c(0, 100)
+point_col <- rgb(matrix(col2rgb(brewer.pal(5, "Purples")[4]) / 255, ncol=3), alpha=0.5)
+
+# create random data
+x_rand <- runif(num_points, xrange[1], xrange[2])
+y_rand <- runif(num_points, yrange[1], yrange[2])
+df_rand <- data.frame(x=x_rand, y=y_rand, type=sample(letters, num_points, rep=T))
+
+# create clustered data
+x_clust <- rnorm(num_points, mean=mean(xrange), sd=5)
+y_clust <- rnorm(num_points, mean=mean(yrange), sd=5)
+df_clust <- data.frame(x=x_clust, y=y_clust, type=sample(letters, num_points, rep=T))
+
+# create uniform data
+unif_grid <- expand.grid(1:ceiling(sqrt(num_points)), 1:ceiling(sqrt(num_points))) + matrix(rnorm(ceiling(sqrt(num_points))^2, mean=0, sd=0.3), nrow=ceiling(sqrt(num_points)))
+samp <- sample(1:ceiling(sqrt(num_points))^2, num_points)
+x_unif <- unif_grid[samp, 1]
+y_unif <- unif_grid[samp, 2]
+df_unif <- data.frame(x=x_unif, y=y_unif, type=sample(letters, num_points, rep=T))
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# compute distance matrices
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+dist_rand <- as.matrix(dist(df_rand[, c("x", "y")]))
+diag(dist_rand) <- NA
+min_rand <- apply(dist_rand, 1, min, na.rm=T)
+dist_clust <- as.matrix(dist(df_clust[, c("x", "y")]))
+diag(dist_clust) <- NA
+min_clust <- apply(dist_clust, 1, min, na.rm=T)
+dist_unif <- as.matrix(dist(df_unif[, c("x", "y")]))
+diag(dist_unif) <- NA
+min_unif <- apply(dist_unif, 1, min, na.rm=T)
+boxplot(min_rand, min_clust, min_unif)
+
+layout(matrix(1:6, nrow=2, byrow=T))
+par(mar=rep(1, 4), oma=c(2, 1, 1, 1))
+plot(df_rand[, c("x", "y")], pch=1, cex=0.5, xlim=c(0, 100), ylim=c(0, 100))
+plot(df_clust[, c("x", "y")], pch=1, cex=0.5, xlim=c(0, 100), ylim=c(0, 100))
+plot(df_unif[, c("x", "y")], pch=1, cex=0.5, xlim=c(0, 100), ylim=c(0, 100))
+plot(ecdf(min_rand))
+plot(ecdf(min_clust))
+plot(ecdf(min_unif))
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# Use spatstat package to measure PPA
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+p_rand <- ppp(df_rand$x, df_rand$y, owin(c(0, 100), c(0, 100)))
+p_clust <- ppp(df_clust$x, df_clust$y, owin(c(0, 100), c(0, 100)))
+p_unif <- ppp(df_unif$x, df_unif$y, owin(c(0, 100), c(0, 100)))
+ds_rand <- density(p_rand)
+ds_clust <- density(p_clust)
+ds_unif <- density(p_unif)
+layout(matrix(1:3, nrow=1))
+par(mar=rep(1,4))
+plot(ds_rand)
+points(p_rand, pch=1, cex=0.5)
+plot(ds_clust)
+points(p_clust, pch=1, cex=0.5)
+plot(ds_unif)
+points(p_unif, pch=1, cex=0.5)
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# Compute and plot the empirical G function
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+layout(matrix(1:6, nrow=2, byrow=T))
+plot(df_rand[, c("x", "y")], pch=16, col=point_col)
+plot(df_clust[, c("x", "y")], pch=16, col=point_col)
+plot(df_unif[, c("x", "y")], pch=16, col=point_col)
+# Plotting the G function 
+# You can specify the R otherwise it will automatically select the R for you 
+plot(Gest(p_rand))
+plot(Gest(p_clust))
+plot(Gest(p_unif))
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# Compute and plot the empirical F function
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+layout(matrix(1:6, nrow=2, byrow=T))
+plot(df_rand[, c("x", "y")], pch=16, col=point_col)
+plot(df_clust[, c("x", "y")], pch=16, col=point_col)
+plot(df_unif[, c("x", "y")], pch=16, col=point_col)
+plot(Fest(p_rand))
+plot(Fest(p_clust))
+plot(Fest(p_unif))
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# Compute and plot the empirical Ripley's K
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+layout(matrix(1:6, nrow=2, byrow=T))
+plot(df_rand[, c("x", "y")], pch=16, col=point_col)
+plot(df_clust[, c("x", "y")], pch=16, col=point_col)
+plot(df_unif[, c("x", "y")], pch=16, col=point_col)
+plot(Kest(p_rand))
+plot(Kest(p_clust))
+plot(Kest(p_unif))
+
+# what does Kest return?
+p_rand_Kest <- Kest(p_rand)
+p_rand_Kest
+names(p_rand_Kest)
+p_rand_Kest$r
+p_rand_Kest$theo
+plot(p_rand_Kest$r, p_rand_Kest$bord, type="l", xlab="r", ylab="K", lwd=2)
