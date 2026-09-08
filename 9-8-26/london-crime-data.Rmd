@@ -28,3 +28,227 @@ plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+<!-- to compile to html:
+knitr::knit(input="Rppa.Rmd",output="Rppa.md")
+system("pandoc -o Rppa.pdf Rppa.md")
+ -->
+
+---
+title: "Point Pattern Analysis with R"
+author: "Josh Gray"
+geometry: margin=1in
+output:
+  pdf_document:
+    fig_width: 4
+    fig_height: 4
+    fig_caption: true
+urlcolor: blue
+---
+
+## London Crime Data
+This example analysis is intended to present some `R` functionality for point pattern analysis. In particular, the `spatstat` package is demonstrated. This is by no means the only, or even the best, package for point pattern analysis. Consult the CRAN [spatial task view](https://cran.r-project.org/web/views/Spatial.html) for additional information.
+
+This analysis roughly follows [this](https://www.r-bloggers.com/introductory-point-pattern-analysis-of-open-crime-data-in-london/) vignette, and we make use of the data prepared by that author. The crime data are from May and June of 2014 (from [UK Police Data](https://data.police.uk/)), and we'll also use a Greater London boundary that has been cut and merged from the Global Administrative Areas dataset [GADM](http://www.gadm.org/).
+
+### Prelims
+First, the required packages are loaded, some preliminary tasks are conducted to change variable names and eliminate crime points that occur outside of the Greater London boundary, and a function to draw SD ellipses is created.
+
+```{r prelims, cache=TRUE, message=FALSE, warning=FALSE, results='hide', tidy=TRUE}
+install.packages("plotrix")
+install.packages("MAPCtools")
+```
+
+```{r}
+library(data.table)
+library(sf) # for readOGR
+library(spatstat) # for Gest, Fest, and Kest
+# library(maptools) # for as.owin function
+library(raster) #
+library(plotrix) # for plotting circles
+library(RColorBrewer) # for nice colors
+```
+
+
+```{r}
+path_to_data <- "C:/Users/aasie/Downloads/LondonCrimeData"
+```
+
+```{r}
+london_crime <- fread(file.path(path_to_data, "londoncrime.csv"))
+# the variables names have spaces, so we get rid of that
+names(london_crime)
+names(london_crime) <- unlist(lapply(names(london_crime), function(x) gsub(" ", ".", x)))
+```
+
+
+```{r}
+# some records are missing location, so we eliminate them
+london_crime <- london_crime[!is.na(Longitude) | !is.na(Latitude)]
+# convert to SpatialPointsDataFrame
+coordinates(london_crime) <- ~ Longitude + Latitude
+class(london_crime)
+```
+
+```{r}
+# get the Greater London outline shape
+
+london_shp <- shapefile(file.path(path_to_data, "greater_london/greater_london.shp"))
+projection(london_crime) <- projection(london_shp)
+```
+
+```{r}
+# eliminate points outside of Greater London
+tmp <- over(london_crime, london_shp)
+names(tmp)
+london_crime <- london_crime[!is.na(tmp$OBJECTID_1), ]
+```
+```{r}
+# Gest, Fest, and Kest now require projected coordinates, so we'll just swap to UTM
+london_utm_proj4 <- "+proj=utm +zone=30 +ellps=WGS84 +datum=WGS84 +units=m +no_defs "
+london_shp_utm <- spTransform(london_shp, london_utm_proj4)
+london_crime_utm <- spTransform(london_crime, london_utm_proj4)
+```
+
+
+```{r}
+# create function to draw standard deviational ellipses
+drawSDEllipse <- function(x, y, c=1, ...){
+  x_dev <- x - mean(x, na.rm=T)
+  y_dev <- y - mean(y, na.rm=T)
+  A <- sum(x_dev^2, na.rm=T) - sum(y_dev^2, na.rm=T)
+  B <- sqrt(A^2 + 4 * sum(x_dev * y_dev, na.rm=T)^2)
+  C <- 2 * sum(x_dev * y_dev, na.rm=T)
+  rot_angle <- atan((A + B) / C)
+  sde_x <- sqrt(sum((x_dev * cos(rot_angle) - y_dev * sin(rot_angle))^2, na.rm=T) / sum(!is.na(x_dev)))
+  sde_y <- sqrt(sum((x_dev * sin(rot_angle) - y_dev * cos(rot_angle))^2, na.rm=T) / sum(!is.na(x_dev)))
+  draw.ellipse(x=mean(x, na.rm=T), y=mean(y, na.rm=T), a=c*sde_x, b=c*sde_y, angle=-1 * rot_angle, deg=F, ...)
+}
+```
+
+### Map all crimes
+We may want to map all crimes, determine their geographic mean, and plot standard deviational ellipses at various multiples of SD. Here's how we can do that:
+
+```{r map_all_crime, message=FALSE, warning=FALSE, fig.cap="Greater London crimes (all types), May-June 2014 with geographic mean and SD ellipse at three sigma.", tidy=TRUE, dpi=300, fig_height=4}
+  point_col <- rgb(matrix(col2rgb(brewer.pal(5, "Purples")[4]) / 255, ncol=3), alpha=0.5)
+  plot(london_shp, col=brewer.pal(7, "Greys")[2])
+  plot(london_crime, add=T, pch=16, cex=0.5, col=point_col)
+  points(mean(coordinates(london_crime)[,1]), mean(coordinates(london_crime)[,2]), pch="*", cex=3)
+  drawSDEllipse(coordinates(london_crime)[,1], coordinates(london_crime)[,2], lty=3, lwd=2)
+  drawSDEllipse(coordinates(london_crime)[,1], coordinates(london_crime)[,2], c=2, lty=3, lwd=2)
+  drawSDEllipse(coordinates(london_crime)[,1], coordinates(london_crime)[,2], c=3, lty=3, lwd=2)
+```
+
+We can improve upon that map by plotting each of the crime types with a unique color
+
+```{r map_all_crime_better, tidy=TRUE, fig.cap="Greater London crimes (all types), May-June 2014.", dpi=300, fig_height=4}
+  pal <- colorRampPalette(brewer.pal(11, "Spectral"))
+  alphacol <- function(x, alpha=0.4) rgb(matrix(col2rgb(x), ncol=3) / 255, alpha=alpha)
+  crime_cols <- unlist(lapply(pal(length(unique(london_crime$Crime.type))), alphacol))
+  par(bg="white", mar = c(0,0,0,0))
+  plot(london_shp, col=brewer.pal(7, "Greys")[2])
+  plot(london_crime, pch=16, cex=0.25, col=crime_cols[as.numeric(as.factor(london_crime$Crime.type))], add=T)
+  legend("bottomleft", legend=unique(london_crime$Crime.type), pch=16, col=crime_cols, ncol=1, bg="white", cex=0.65, bty="n")
+```
+
+Next, we may wish to create individual maps for each crime type:
+
+```{r map_individual_crimes, tidy=TRUE, fig.cap="Greater London crimes by type, May-June 2014.", dpi=300, fig_height=4}
+# individual maps for each crime type
+  pal <- colorRampPalette(brewer.pal(11, "Spectral"))
+  crime_cols <- unlist(lapply(pal(length(unique(london_crime$Crime.type))), alphacol))
+  point_col <- rgb(matrix(col2rgb(brewer.pal(5, "Greys")[5]) / 255, ncol=3), alpha=0.3)
+  layout(matrix(1:15, nrow=3, byrow=T))
+  par(mar=rep(1, 4), oma=rep(1, 4))
+  i <- 1
+  for(crime_type in unique(london_crime$Crime.type)){
+    london_crime_tmp <- london_crime[london_crime$Crime.type == crime_type,]
+    plot(london_shp, col=brewer.pal(7, "Greys")[2])
+    plot(london_crime_tmp, pch=16, cex=0.5, col=point_col, add=T)
+    title(crime_type)
+    i <- i + 1
+  }
+```
+
+### Gest, Fest, and Kest
+We may want to analyze the point patterns to assess the degree of clumpiness/dispersion for each crime. We can use functions in the `spatstat` package to compute and plot the `G`, `F`, and `K` functions:
+
+```{r}
+london_owin <- st_as_sf(london_shp_utm)
+
+```
+
+```{r crime_type_Gest, tidy=TRUE, fig.cap="Greater London crimes, May-June 2014: G function", dpi=300, fig_height=4}
+  layout(matrix(1:15, nrow=3, byrow=T))
+  par(mar=c(3, 4, 1, 1), oma=rep(1, 4))
+  i <- 1
+  for(crime_type in unique(london_crime$Crime.type)){
+    london_crime_tmp <- london_crime_utm[london_crime_utm$Crime.type == crime_type,]
+    london_crime_tmp <- remove.duplicates(london_crime_tmp)
+    p_tmp <- ppp(x=coordinates(london_crime_tmp)[,1], y=coordinates(london_crime_tmp)[,2], window=london_owin)
+    plot(Gest(p_tmp), main=crime_type)
+    i <- i + 1
+  }
+```
+
+```{r crime_type_Fest, tidy=TRUE, fig.cap="Greater London crimes, May-June 2014: F function", dpi=300, fig_height=4}
+  layout(matrix(1:15, nrow=3, byrow=T))
+  par(mar=c(3, 4, 1, 1), oma=rep(1, 4))
+  i <- 1
+  for(crime_type in unique(london_crime$Crime.type)){
+    london_crime_tmp <- london_crime_utm[london_crime_utm$Crime.type == crime_type,]
+    london_crime_tmp <- remove.duplicates(london_crime_tmp)
+    p_tmp <- ppp(x=coordinates(london_crime_tmp)[,1], y=coordinates(london_crime_tmp)[,2], window=as.owin(london_shp_utm))
+    plot(Fest(p_tmp), main=crime_type)
+    i <- i + 1
+  }
+```
+
+```{r crime_type_Kest, tidy=TRUE, fig.cap="Greater London crimes, May-June 2014: K (Ripley's) function", dpi=300, fig_height=4}
+  layout(matrix(1:15, nrow=3, byrow=T))
+  par(mar=c(3, 4, 1, 1), oma=rep(1, 4))
+  i <- 1
+  for(crime_type in unique(london_crime$Crime.type)){
+    london_crime_tmp <- london_crime_utm[london_crime_utm$Crime.type == crime_type,]
+    london_crime_tmp <- remove.duplicates(london_crime_tmp)
+    p_tmp <- ppp(x=coordinates(london_crime_tmp)[,1], y=coordinates(london_crime_tmp)[,2], window=as.owin(london_shp_utm))
+    plot(Kest(p_tmp), main=crime_type)
+    i <- i + 1
+  }
+```
+
+---
+
+Finally, we can compute the kernel density for two different values of kernel width:
+
+```{r crime_types_kernel_density_default, tidy=TRUE, fig.cap="Kernel density of Greater London crimes, May-June 2014 with mean bandwidth selection.", dpi=300, fig_height=4}
+# plot the kernel density
+  Zissou1 = c("#3B9AB2", "#78B7C5", "#EBCC2A", "#E1AF00", "#F21A00")
+  pal <- colorRampPalette(Zissou1)
+  layout(matrix(1:15, nrow=3, byrow=T))
+  par(mar=rep(1, 4), oma=rep(1, 4))
+  i <- 1
+  for(crime_type in unique(london_crime$Crime.type)){
+    london_crime_tmp <- london_crime_utm[london_crime_utm$Crime.type == crime_type,]
+    london_crime_tmp <- remove.duplicates(london_crime_tmp)
+    p_tmp <- ppp(x=coordinates(london_crime_tmp)[,1], y=coordinates(london_crime_tmp)[,2], window=as.owin(london_shp_utm))
+    plot(density(p_tmp), col=pal(255), main=crime_type)
+    # plot(density(p_tmp, sigma=0.01), col=pal(255), main=crime_type)
+    i <- i + 1
+  }
+```
+
+```{r crime_types_kernel_density_arbitrary, tidy=TRUE, fig.cap="Kernel density of Greater London crimes, May-June 2014 with arbitrary, small bandwidth.", dpi=300, fig_height=4}
+# plot the kernel density
+  layout(matrix(1:15, nrow=3, byrow=T))
+  par(mar=rep(1, 4), oma=rep(1, 4))
+  i <- 1
+  for(crime_type in unique(london_crime$Crime.type)){
+    london_crime_tmp <- london_crime_utm[london_crime_utm$Crime.type == crime_type,]
+    london_crime_tmp <- remove.duplicates(london_crime_tmp)
+    p_tmp <- ppp(x=coordinates(london_crime_tmp)[,1], y=coordinates(london_crime_tmp)[,2], window=as.owin(london_shp_utm))
+    plot(density(p_tmp, sigma=0.01), col=pal(255), main=crime_type)
+    i <- i + 1
+  }
+```

@@ -28,3 +28,154 @@ plot(pressure)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+library(spatstat)
+```
+#----------------------------------------------------------------
+```{r}
+set.seed(42)
+num_points <- 150
+yrange <- xrange <- c(0, 100)
+point_col <- rgb(matrix(col2rgb(brewer.pal(5, "Greys")[5]) / 255, ncol=3), alpha=0.5)
+```
+
+```{r}
+# create random data
+x_rand <- runif(num_points, xrange[1], xrange[2])
+y_rand <- runif(num_points, yrange[1], yrange[2])
+df_rand <- data.frame(x=x_rand, y=y_rand, type=sample(letters, num_points, rep=T))
+# coordinates(df_rand) <- ~ x + y
+```
+
+```{r}
+# create clustered data
+x_clust <- rnorm(num_points, mean=mean(xrange), sd=5)
+y_clust <- rnorm(num_points, mean=mean(yrange), sd=5)
+df_clust <- data.frame(x=x_clust, y=y_clust, type=sample(letters, num_points, rep=T))
+# coordinates(df_clust) <- ~ x + y
+```
+
+
+```{r}
+# create uniform data
+unif_grid <- expand.grid(1:ceiling(sqrt(num_points)), 1:ceiling(sqrt(num_points))) + matrix(rnorm(ceiling(sqrt(num_points))^2, mean=0, sd=0.3), nrow=ceiling(sqrt(num_points)))
+samp <- sample(1:ceiling(sqrt(num_points))^2, num_points)
+x_unif <- unif_grid[samp, 1]
+y_unif <- unif_grid[samp, 2]
+df_unif <- data.frame(x=x_unif, y=y_unif, type=sample(letters, num_points, rep=T))
+# coordinates(df_unif) <- ~ x + y
+```
+
+```{r}
+# do the Ripley's K analysis
+set.seed(42)
+N <- 1000
+# These are the different test patterns that we can choose from 
+# test_df <- df_rand
+# test_df <- df_clust
+test_df <- df_unif
+```
+
+```{r}
+p <- ppp(test_df$x, test_df$y, owin(range(test_df$x), range(test_df$y)))
+# p <- ppp(test_df$x, test_df$y, owin(xrange, yrange))
+K <- Kest(p)
+L <- sqrt(K$border / pi) - K$r
+```
+
+```{r}
+# Doing the bootstrap manually 
+# Reserving the space for your matrix to conserve data processing power 
+Ls <- matrix(NA, nrow=N, ncol=length(K$border))
+for(i in 1:N){
+  # draw from random sample
+  x_rand <- runif(nrow(test_df), min(test_df$x), max(test_df$x))
+  y_rand <- runif(nrow(test_df), min(test_df$y), max(test_df$y))
+  tmp_df <- data.frame(x=x_rand, y=y_rand)
+  p_tmp <- ppp(tmp_df$x, tmp_df$y, owin(range(tmp_df$x), range(tmp_df$y)))
+  # p_tmp <- ppp(tmp_df$x, tmp_df$y, owin(xrange, yrange))
+  tmpK <- Kest(p_tmp)
+  # the value of the test statistic of L 
+  tmpL <- sqrt(tmpK$border / pi) - tmpK$r
+  Ls[i, ] <- tmpL
+  # Ks[i, ] <- tmpK$border
+}
+
+```
+
+```{r}
+# apply is like lapply except that it works on matrices 
+# taking the maximum and minimum value for every single column 
+# looking down each column and taking out a extrema - i.e. creating a 98% CI 
+# You could also do maxima and minima in addition to maxima and minimum 
+Ls_max <- apply(Ls, 2, max, na.rm=T)
+Ls_min <- apply(Ls, 2, min, na.rm=T)
+```
+
+```{r}
+# p_env <- envelope(p, Kest)
+# ylim <- range(c(sqrt(p_env$obs / pi) - p_env$r, sqrt(p_env$lo / pi) - p_env$r, sqrt(p_env$hi / pi) - p_env$r, sqrt(p_env$theo / pi) - p_env$r))
+# plot(p_env$r, rep(NA, length(p_env$r)), ylim=ylim, type="n", xlab="r", ylab="L(r)")
+# points(p_env$r, sqrt(p_env$obs / pi) - p_env$r, type="l", lty=1, col=1)
+# points(p_env$r, sqrt(p_env$theo / pi) - p_env$r, type="l", lty=2, col=4)
+# points(p_env$r, sqrt(p_env$hi / pi) - p_env$r, type="l", lty=2, col=2)
+# points(p_env$r, sqrt(p_env$lo / pi) - p_env$r, type="l", lty=2, col=2)
+```
+
+```{r}
+layout(matrix(1:2, nrow=1))
+# plot the point pattern
+plot(test_df$x, test_df$y, pch=16, col=point_col, xlab="x", ylab="y")
+```
+
+```{r}
+# technically looking at credibility intervals, not confidence intervals 
+# Would i get test statistic this extreme if the distribution truly was random? 
+# plot the Ripley's K w/ CI
+ylim <- c(min(c(L, Ls_max, Ls_min), na.rm=T), max(c(L, Ls_max, Ls_min), na.rm=T))
+plot(K$r, L, lwd=2, col=1, ylim=ylim, type="l", xlab="d", ylab="L(d)-d")
+points(K$r, Ls_max, type="l", lty=3, col=2)
+points(K$r, Ls_min, type="l", lty=3, col=2)
+legend("topleft", legend=c("Lobs", "99% CI"), lty=c(1,2), col=c(1,2), lwd=c(2, 1))
+```
+
+
+#----------------------------------------------------------------
+# bivariate
+
+layout(matrix(1:2, nrow=1))
+plot(longleaf)
+point_col1 <- rgb(matrix(col2rgb(brewer.pal(5, "Blues")[5]) / 255, ncol=3), alpha=0.5)
+point_col2 <- rgb(matrix(col2rgb(brewer.pal(5, "Reds")[5]) / 255, ncol=3), alpha=0.5)
+plot(NA, xlim=range(longleaf$x), ylim=range(longleaf$y), xlab="", ylab="")
+points(longleaf[marks(longleaf) <= 15], pch=16, col=point_col1)
+points(longleaf[marks(longleaf) >= 25], pch=16, col=point_col2)
+legend("bottom", legend=c("<=15", ">=25"), pch=16, col=c(point_col1, point_col2), horiz=T, bg="white")
+
+# plot univariate and bivariate K functions for small and large trees
+layout(matrix(1:3, nrow=1))
+plot(Kest(longleaf[marks(longleaf) <= 15]))
+plot(Kest(longleaf[marks(longleaf) >= 25]))
+plot(Kmulti(longleaf, marks(longleaf) <=15, marks(longleaf) >=25))
+
+# bootstrap CI
+N <- 100
+K_trees <- Kmulti(longleaf, marks(longleaf) <=15, marks(longleaf) >=25)
+L_trees <- sqrt(K_trees$border / pi) - K_trees$r
+Ls <- matrix(NA, nrow=N, ncol=length(K_trees$r))
+for(i in 1:N){
+  # do label permutation
+  K_tmp <- Kmulti(longleaf, sample(marks(longleaf) <= 15), sample(marks(longleaf) >= 25))
+  L_tmp <- sqrt(K_tmp$border / pi) - K_tmp$r
+  Ls[i, ] <- L_tmp
+}
+
+Ls_min <- apply(Ls, 2, min)
+Ls_max <- apply(Ls, 2, max)
+
+ylim <- c(min(c(L_trees, Ls_max, Ls_min), na.rm=T), max(c(L_trees, Ls_max, Ls_min), na.rm=T))
+plot(K_trees$r, L_trees, lwd=2, col=1, ylim=ylim, type="l", xlab="d", ylab="L(d)-d")
+points(K_trees$r, Ls_max, type="l", lty=3, col=2)
+points(K_trees$r, Ls_min, type="l", lty=3, col=2)
+legend("topleft", legend=c("Lobs", "99% CI"), lty=c(1,2), col=c(1,2), lwd=c(2, 1))
