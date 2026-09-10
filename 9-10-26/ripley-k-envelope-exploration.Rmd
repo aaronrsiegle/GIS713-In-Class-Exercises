@@ -1,0 +1,243 @@
+---
+title: "ripley-k-envelope"
+author: "Aaron_Siegle"
+date: "2026-09-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+library(spatstat)
+library(RColorBrewer)
+data(longleaf)
+```
+
+```{r}
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# function to automate K to L conversion 
+KtoL <- function(Kobj){
+    # Function to convert Kest objects to Lest objects
+    list(
+        r=Kobj$r,
+        obs=sqrt(Kobj$obs / pi) - Kobj$r,
+        lo=sqrt(Kobj$lo / pi) - Kobj$r,
+        hi=sqrt(Kobj$hi / pi) - Kobj$r,
+        theo=sqrt(Kobj$theo / pi) - Kobj$r
+    )
+}
+```
+
+
+```{r}
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# notice here how we pass additional, unspecified arguments to the plot function!
+# we use that in the final lines of this demo to provide a title using the "main"
+# argument to plot
+# plotting function - use this for HW 
+PlotKenvAsL <- function(Kobj, poly_col="#BDD7E7", obs_col="#636363", exp_col="#A50F15", ...){
+    # Function to make nice plots of Kest envelope objects transformed to L
+    Lobj <- KtoL(Kobj)
+    polyx <- c(Lobj$r, rev(Lobj$r))
+    polyy <- c(Lobj$lo, rev(Lobj$hi))
+    xlim <- range(Lobj$r)
+    ylim <- range(c(Lobj$obs, Lobj$theo, Lobj$lo, Lobj$hi))
+    plot(NA, NA, xlim=xlim, ylim=ylim, type="n", xlab=expression(italic("r")), ylab=expression(italic("L(r)")), ...)
+    polygon(x=polyx, y=polyy, col=poly_col, border=NA)
+    points(Lobj$r, Lobj$obs, type="l", lty=1, col=obs_col, lwd=2)
+    if(length(Lobj$theo) > 0) points(Lobj$r, Lobj$theo, type="l", lty=2, col=exp_col)
+}
+```
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# Quick notes on rshift.ppp(x)
+# There is a difference between marked and "multitype" ppp
+# If x is multitype, then each grouping/type is shifted separately
+# If it's not multitype, then you need to provide the "group" parameters
+# To get toroidal shift, you need to specify "edge=torus"
+# Toroidal shifts only make sense for rectangular windows
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```{r}
+# rshift example
+t_red <- rgb(t(col2rgb(brewer.pal(5, "Reds")[4])), max=255, alpha=0.5*255)
+t_blue <- rgb(t(col2rgb(brewer.pal(5, "Blues")[4])), max=255, alpha=0.5*255)
+plot_cols <- c(t_red, t_blue) # transparent red/blue for bivariate ppp
+```
+
+
+```{r}
+# change the marks to "J" and "A" for juvenile and adults
+tmp <- longleaf
+marks(tmp) <- rep("J", length(marks(longleaf)))
+marks(tmp)[marks(longleaf) >= 25] <- "A"
+```
+
+
+```{r}
+# compare rshift options
+# the rshift function is very important to understand 
+layout(matrix(1:4, nrow=2, byrow=T))
+plot(tmp, cols=plot_cols, chars=16, cex=1.5, main="longleaf") # original pattern
+# rshift w/o specifying "group" shifts everything together
+# this is the torodial shift with no groups 
+# only supply the edge arguments - the patterns are exactly the same but both the patterns are shifted 
+plot(rshift(tmp, edge="torus"), cols=plot_cols, chars=16, cex=1.5, main="toroidal, no groups")
+# rshift specifying group (as a factor!) shifts each one independently
+plot(rshift(tmp, group=as.factor(marks(tmp)), edge="torus"), cols=plot_cols, chars=16, cex=1.5, main="toroidal, both groups shifted ind.")
+# rshift with groups, and using "which" to shift just juvenile ("J") types
+# the which argument measn that you only shift one group 
+# for the purpose of the null, it does not matter which ppp you are shifting 
+plot(rshift(tmp, group=as.factor(marks(tmp)), which="J", edge="torus"), cols=plot_cols, chars=16, cex=1.5, main="toroidal, one group shifted")
+```
+
+
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```{r}
+# rlabel example
+layout(matrix(1:3, nrow=1))
+plot(tmp, cols=plot_cols, chars=16, cex=1.5, main="longleaf") # original pattern
+plot(rlabel(tmp), cols=plot_cols, chars=16, cex=1.5, main="label perm 1") # random label perm
+plot(rlabel(tmp), cols=plot_cols, chars=16, cex=1.5, main="label perm 2") # random lable perm
+# notice that the original pattern is preserved, just the "J" or "A" designation is changed
+```
+
+```{r}
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# univariate point patterns
+# can use the envelope command to create the envelope for 
+ll_env_juv <- envelope(longleaf[marks(longleaf) <=15 ], Kest)
+ll_env_mat <- envelope(longleaf[marks(longleaf) >= 25 ], Kest)
+layout(matrix(1:2, nrow=1))
+PlotKenvAsL(ll_env_juv)
+PlotKenvAsL(ll_env_mat)
+```
+```{r}
+# Important: the default method of simulating reference point patterns w/ envelope is CSR!
+# bivariate w/ envelopes from default method (CSR but the right number of relative marks)
+# far fewer J group around A group than we expect
+# But this is wrong because it does not perserve the spatial pattterns of the input data - i.e. it does not do the torodial shift 
+ll_env_csr <- envelope(longleaf, Kmulti, I=marks(longleaf) <= 15, J=marks(longleaf) >= 25)
+PlotKenvAsL(ll_env_csr)
+```
+
+
+```{r}
+# to test independence of point pattern processes, conditioned on univariate patterns, we
+# need a toroidal shift (which we can do since this is a rectangular window) that shifts one
+# or both of the juvenile and adult patterns independently, but preserves each univariate pattern
+# we can use rshift, but keep in mind that we must use "group" since this isn't a multitype ppp
+# we'll also define a function to supply the marks and use that for "I" and "J"
+# Need to simulate the expression BEFORE you evaluate the marks - so that marks aren't set in stone and be assigned correctly 
+fJ <- function(x) marks(x) <= 15
+fA <- function(x) marks(x) >= 25
+# This is the correct way to do inference 
+# there is still a range between 4 and 25 where there are fewer A points near B points - can be confident that replusion is happening at these scales 
+ll_env_toroidal <- envelope(longleaf, Kmulti, I=fJ, J=fA, simulate=expression(rshift(longleaf, group=as.factor(marks(longleaf)<=15), edge="torus")))
+PlotKenvAsL(ll_env_toroidal)
+```
+
+```{r}
+# we can verify that rshift() is doing what we expect, and demonstrate that we could supply
+# any sort of custom function to the "simulate" argument of envelope()
+# Josh is writing his own shift function
+MyShift <- function(x){
+    # performs toroidal shift on the longleaf dataset
+    # by shifting each juvenile and adult univariate ppp independently
+    x_a <- longleaf[marks(longleaf) <= 15]
+    x_b <- longleaf[marks(longleaf) >= 25]
+    x_a <- rshift(x_a, edge="torus")
+    x_b <- rshift(x_b, edge="torus")
+    X <- superimpose(x_a, x_b)
+    return(X)
+}
+```
+
+
+```{r}
+ll_env_toroidal_byhand <- envelope(longleaf, Kmulti, I=fJ, J=fA, simulate=expression(MyShift(longleaf)))
+```
+
+```{r}
+# plot them together to see that they're close enough to be convinced that differences are
+# probably due to stochastic simulation processes and a relatively small set of simulations
+# you can use the "nsim" argument to envelope() to increase the number of simulations, and thus
+# gain greater certainty about the envelopes, but pay attention to "nrank" argument and read the
+# full envelope() help so you'll know which values are plotted
+# There is an element of stochasticity in this process
+layout(matrix(1:2, nrow=1))
+PlotKenvAsL(ll_env_toroidal_byhand)
+PlotKenvAsL(ll_env_toroidal)
+```
+
+```{r}
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# what about a label permutation? Well, that's a bit easier using rlabel()
+# first, let's see what it does:
+layout(matrix(1:4, nrow=2))
+plot(longleaf, main="original")
+plot(rlabel(longleaf), main="perm 1")
+plot(rlabel(longleaf), main="perm 2")
+plot(rlabel(longleaf), main="perm 3")
+# note that the locations are preserved, but the marks have been randomly reassigned
+```
+
+
+```{r}
+# first try...
+ll_env_labelperm <- envelope(longleaf, Kmulti, I=marks(longleaf) <= 15, J=marks(longleaf) >= 25, simulate=expression(rlabel(longleaf)))
+PlotKenvAsL(ll_env_labelperm)
+```
+
+```{r}
+# why don't we have an envelope?
+# We undid all the scrambling that we did first - that's why the low and high boundaries are the same and thus no confidence envlope was not created 
+# need to think about the order critcially - need to use the F and J function to get around this 
+names(ll_env_labelperm)
+identical(ll_env_labelperm$lo, ll_env_labelperm$hi) # so the upper and lower bounds are the same?
+# the thing is, our "simulate=" expression was fine, but since we specified the I and J args
+# to envelope() by referencing the original longleaf dataset, and we don't change the point locations
+# we just end up reassigning the labels. That is, we undo the permutation w/ our I and J expression
+# we need to instead write functions, as above, that assign the labels based on the marks of each
+```
+
+```{r}
+# simulated point pattern independently (borrowing the same functions as above)
+# Josh would argue for the torodial shift approach in this case 
+ll_env_labelperm <- envelope(longleaf, Kmulti, I=fJ, J=fA, simulate=expression(rlabel(longleaf)))
+PlotKenvAsL(ll_env_labelperm)
+```
+```{r}
+#-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+# now let's plot them all together
+layout(matrix(1:3, nrow=1))
+PlotKenvAsL(ll_env_csr, main="Default envelope() CSR")
+PlotKenvAsL(ll_env_toroidal, main="Toroidal Shift", poly_col=brewer.pal(5, "Reds")[2])
+PlotKenvAsL(ll_env_labelperm, main="Label Permutation", poly_col=brewer.pal(5, "Greens")[2])
+# default envelope - no spatial pattern preserved 
+# toroidal - right approach - breaking the spatial relationship 
+# label permuation - wrong bc the process did not decide whether the tree is juvenile or adult - looks more at the interaction between the points 
+```

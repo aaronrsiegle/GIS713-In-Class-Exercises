@@ -1,0 +1,189 @@
+---
+title: "ripley-k-pt2"
+author: "Aaron_Siegle"
+date: "2026-09-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+library(RColorBrewer)
+```
+
+
+```{r}
+library(spatstat)
+```
+#----------------------------------------------------------------
+```{r}
+set.seed(42)
+num_points <- 150
+yrange <- xrange <- c(0, 100)
+point_col <- rgb(matrix(col2rgb(brewer.pal(5, "Greys")[5]) / 255, ncol=3), alpha=0.5)
+```
+
+```{r}
+# create random data
+x_rand <- runif(num_points, xrange[1], xrange[2])
+y_rand <- runif(num_points, yrange[1], yrange[2])
+df_rand <- data.frame(x=x_rand, y=y_rand, type=sample(letters, num_points, rep=T))
+# coordinates(df_rand) <- ~ x + y
+```
+
+```{r}
+# create clustered data
+x_clust <- rnorm(num_points, mean=mean(xrange), sd=5)
+y_clust <- rnorm(num_points, mean=mean(yrange), sd=5)
+df_clust <- data.frame(x=x_clust, y=y_clust, type=sample(letters, num_points, rep=T))
+# coordinates(df_clust) <- ~ x + y
+```
+
+
+```{r}
+# create uniform data
+unif_grid <- expand.grid(1:ceiling(sqrt(num_points)), 1:ceiling(sqrt(num_points))) + matrix(rnorm(ceiling(sqrt(num_points))^2, mean=0, sd=0.3), nrow=ceiling(sqrt(num_points)))
+samp <- sample(1:ceiling(sqrt(num_points))^2, num_points)
+x_unif <- unif_grid[samp, 1]
+y_unif <- unif_grid[samp, 2]
+df_unif <- data.frame(x=x_unif, y=y_unif, type=sample(letters, num_points, rep=T))
+# coordinates(df_unif) <- ~ x + y
+```
+
+
+```{r}
+# do the Ripley's K analysis
+set.seed(42)
+N <- 100
+# test_df <- df_rand
+test_df <- df_clust
+# test_df <- df_unif
+```
+
+```{r}
+p <- ppp(test_df$x, test_df$y, owin(range(test_df$x), range(test_df$y)))
+# p <- ppp(test_df$x, test_df$y, owin(xrange, yrange))
+K <- Kest(p)
+L <- sqrt(K$border / pi) - K$r
+```
+
+```{r}
+Ls <- matrix(NA, nrow=N, ncol=length(K$border))
+for(i in 1:N){
+  # draw from random sample
+  x_rand <- runif(nrow(test_df), min(test_df$x), max(test_df$x))
+  y_rand <- runif(nrow(test_df), min(test_df$y), max(test_df$y))
+  tmp_df <- data.frame(x=x_rand, y=y_rand)
+  p_tmp <- ppp(tmp_df$x, tmp_df$y, owin(range(tmp_df$x), range(tmp_df$y)))
+  # p_tmp <- ppp(tmp_df$x, tmp_df$y, owin(xrange, yrange))
+  tmpK <- Kest(p_tmp)
+  tmpL <- sqrt(tmpK$border / pi) - tmpK$r
+  Ls[i, ] <- tmpL
+  # Ks[i, ] <- tmpK$border
+}
+
+Ls_max <- apply(Ls, 2, max, na.rm=T)
+Ls_min <- apply(Ls, 2, min, na.rm=T)
+```
+
+
+# p_env <- envelope(p, Kest)
+# ylim <- range(c(sqrt(p_env$obs / pi) - p_env$r, sqrt(p_env$lo / pi) - p_env$r, sqrt(p_env$hi / pi) - p_env$r, sqrt(p_env$theo / pi) - p_env$r))
+# plot(p_env$r, rep(NA, length(p_env$r)), ylim=ylim, type="n", xlab="r", ylab="L(r)")
+# points(p_env$r, sqrt(p_env$obs / pi) - p_env$r, type="l", lty=1, col=1)
+# points(p_env$r, sqrt(p_env$theo / pi) - p_env$r, type="l", lty=2, col=4)
+# points(p_env$r, sqrt(p_env$hi / pi) - p_env$r, type="l", lty=2, col=2)
+# points(p_env$r, sqrt(p_env$lo / pi) - p_env$r, type="l", lty=2, col=2)
+
+```{r}
+layout(matrix(1:2, nrow=1))
+# plot the point pattern
+plot(test_df$x, test_df$y, pch=16, col=point_col, xlab="x", ylab="y")
+# plot the Ripley's K w/ CI
+ylim <- c(min(c(L, Ls_max, Ls_min), na.rm=T), max(c(L, Ls_max, Ls_min), na.rm=T))
+plot(K$r, L, lwd=2, col=1, ylim=ylim, type="l", xlab="d", ylab="L(d)-d")
+points(K$r, Ls_max, type="l", lty=3, col=2)
+points(K$r, Ls_min, type="l", lty=3, col=2)
+legend("topleft", legend=c("Lobs", "99% CI"), lty=c(1,2), col=c(1,2), lwd=c(2, 1))
+```
+
+
+#----------------------------------------------------------------
+# bivariate
+```{r}
+# now working with longleaf pine data 
+layout(matrix(1:2, nrow=1))
+plot(longleaf)
+point_col1 <- rgb(matrix(col2rgb(brewer.pal(5, "Blues")[5]) / 255, ncol=3), alpha=0.5)
+point_col2 <- rgb(matrix(col2rgb(brewer.pal(5, "Reds")[5]) / 255, ncol=3), alpha=0.5)
+plot(NA, xlim=range(longleaf$x), ylim=range(longleaf$y), xlab="", ylab="")
+points(longleaf[marks(longleaf) <= 15], pch=16, col=point_col1)
+points(longleaf[marks(longleaf) >= 25], pch=16, col=point_col2)
+legend("bottom", legend=c("<=15", ">=25"), pch=16, col=c(point_col1, point_col2), horiz=T, bg="white")
+```
+```{r}
+# plot univariate and bivariate K functions for small and large trees
+layout(matrix(1:3, nrow=1))
+plot(Kest(longleaf[marks(longleaf) <= 15]))
+plot(Kest(longleaf[marks(longleaf) >= 25]))
+plot(Kmulti(longleaf, marks(longleaf) <=15, marks(longleaf) >=25))
+# The univariate pattern for juveniles is above the poisson - means it's clustered
+# adult trees are clustered but to a lesser extent 
+# shows a pattern of replusion between adult and juvenile trees
+```
+```{r}
+# bootstrap CI
+N <- 100
+# The results of the thing we did earlier
+K_trees <- Kmulti(longleaf, marks(longleaf) <=15, marks(longleaf) >=25)
+# convert to L so that we have the 0 expectation
+L_trees <- sqrt(K_trees$border / pi) - K_trees$r
+# preallocating our space in the matrix 
+Ls <- matrix(NA, nrow=N, ncol=length(K_trees$r))
+for(i in 1:N){
+  # do label permutation
+  # sampling the marks to define the i group and the j group 
+  K_tmp <- Kmulti(longleaf, sample(marks(longleaf) <= 15), sample(marks(longleaf) >= 25))
+  L_tmp <- sqrt(K_tmp$border / pi) - K_tmp$r
+  Ls[i, ] <- L_tmp
+}
+```
+
+
+```{r}
+Ls_min <- apply(Ls, 2, min)
+Ls_max <- apply(Ls, 2, max)
+```
+
+
+```{r}
+ylim <- c(min(c(L_trees, Ls_max, Ls_min), na.rm=T), max(c(L_trees, Ls_max, Ls_min), na.rm=T))
+plot(K_trees$r, L_trees, lwd=2, col=1, ylim=ylim, type="l", xlab="d", ylab="L(d)-d")
+points(K_trees$r, Ls_max, type="l", lty=3, col=2)
+points(K_trees$r, Ls_min, type="l", lty=3, col=2)
+legend("topleft", legend=c("Lobs", "99% CI"), lty=c(1,2), col=c(1,2), lwd=c(2, 1))
+# all of the k values are outside the confidence interval 
+# around every adult tree are fewer juveniles than you would expect 
+```
