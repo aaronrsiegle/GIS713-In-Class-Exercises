@@ -1,0 +1,298 @@
+---
+title: "Untitled"
+author: "Aaron_Siegle"
+date: "2026-09-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+```{r}
+library(spatialreg)
+library(sf)
+library(spdep)
+library(RColorBrewer)
+library(maptools)
+```
+
+```{r}
+# prelims
+data(meuse)
+data(meuse.grid)
+meuse = st_as_sf(meuse, coords = c("x", "y"), crs = 28992)
+meuse.grid = st_as_sf(meuse.grid, coords = c("x", "y"), crs = 28992) \
+```
+
+# meuse[1:5,]
+# is.factor(meuse$ffreq)
+# is.factor(meuse.grid$ffreq)
+# coordinates(meuse.grid) <- c("x", "y")
+# meuse.grid$ffreq <- factor(meuse.grid$ffreq)
+# gridded(meuse.grid) <- TRUE
+
+###################################################################
+```{r}
+# OLS
+cad_lm <- lm(cadmium ~ dist, data=meuse)
+meuse.grid$cad_lm <- predict(cad_lm, newdata=meuse.grid)
+meuse$cad_lm_resids <- cad_lm$residuals
+plot(meuse["cad_lm_resids"])
+plot(meuse["cad_lm_resids"], breaks="quantile")
+?plot.sf
+```
+
+# qs <- quantile(meuse$cad_lm_resids, c(0, 0.02, 0.98, 1))
+# tmp_breaks <- seq(0, max(abs(qs[2:3])), len=5)
+# breaks <- c(-1 * max(abs(qs[c(1, 4)])), -1 * rev(tmp_breaks[2:length(tmp_breaks)]), tmp_breaks[2:length(tmp_breaks)], max(abs(qs[c(1, 4)])))
+# pal <- colorRampPalette(brewer.pal(11, "RdBu"))
+# resid_cols <- pal(length(breaks) - 1)
+# plot(coordinates(meuse)[,1], coordinates(meuse)[,2], pch=16, cex=5,  col=resid_cols[findInterval(meuse$cad_lm_resids, breaks, all.inside=T)])
+# legend("topleft", legend=paste(round(breaks, 1)[1:(length(breaks) - 1)], round(breaks, 1)[2:length(breaks)], sep="-"), pch=16, col=resid_cols, title="Cad. OLS Resids")
+
+###################################################################
+```{r}
+# What we do now that we know that there is spatial autocorrelation in the data 
+# Moran's I
+# weights matrix as inverse of distance
+# calculate the euclidean distance and returns as a matrix object 
+# divides one by every element 
+w <- 1 / as.matrix(dist(st_coordinates(meuse)))
+# solving for diagonial points 
+diag(w) <- 0
+# mat2list - takes the matrix and makes it a list 
+moran.test(meuse$cadmium, mat2listw(w))
+moran.test(residuals(cad_lm), mat2listw(w))
+```
+
+# a note on why we prefer lm.morantest rather than moran.test:
+# moran.test is for testing spatial autocorrelation in primary variables
+# it is inappropriate when applied to residuals of a model that includes
+# covariates. It will produce the same result when applied to a model w/o
+```{r}
+# covariates: 
+moran.test(meuse$cadmium, mat2listw(w))
+lm.morantest(lm(cadmium~1, data=meuse), mat2listw(w))
+tmp <- lm(cadmium~dist, data=meuse)
+moran.test(tmp$residuals, mat2listw(w))
+lm.morantest(tmp, mat2listw(w))
+```
+
+
+```{r}
+# is there spatial autocorr in residuals of OLS model?
+lm.morantest(cad_lm, mat2listw(w))
+# is there something else in the model that I can use to explain the spatial autocorrelation 
+# For us in Meuse, we are testing for spatial autocorrelation 
+lm1 <- lm(cadmium ~ dist + ffreq, data=meuse)
+lm.morantest(lm1, mat2listw(w))
+meuse$cad_lm_resids <- lm1$residuals
+plot(meuse["cad_lm_resids"])
+```
+
+
+```{r}
+# weights matrix based on 8 nearest neighbors
+# knn2nb - k nearest neighbors to neighbor best - subsetting for the 8 nearest neighbors 
+w <- knn2nb(knearneigh(meuse, k=8))
+lm.morantest(lm1, nb2listw(w))
+```
+
+```{r}
+# weights matrix w/ varying number of neighbors, based off maximum nearest neighbor distance
+nm <- knn2nb(knearneigh(meuse))
+plot(nm, st_coordinates(meuse))
+max_dist <- max(unlist(nbdists(nm, meuse)))
+nb <- dnearneigh(meuse, 0, max_dist)
+colW <- nb2listw(nb, style="W")
+moran(meuse$cadmium, colW, length(nb), Szero(colW))
+moran.test(meuse$cadmium, colW)
+```
+
+```{r}
+# binary neighbor weights
+colW <- nb2listw(nb, style="B")
+?nb2listw
+moran.test(meuse$cadmium, colW)
+```
+
+###################################################################
+# Maybe don't pay attention here, but if you care, here's how to do GWR
+###################################################################
+```{r}
+library(spgwr)
+example(gwr)
+optim_bw <- gwr.sel(cadmium~dist, data=meuse)
+cad_gwr <- gwr(cadmium ~ dist, meuse, bandwidth = optim_bw, hatmatrix=TRUE)
+# allows us to use the gwr to predict values at unmeasured points 
+# important because the betas are different compared on your location 
+cad_gwr_grid <- gwr(cadmium ~ dist, meuse, bandwidth = optim_bw, fit.points=meuse.grid, predict=T, fittedGWRobject=cad_gwr)
+names(cad_gwr_grid)
+names(cad_gwr_grid$SDF)
+spplot(cad_gwr_grid$SDF, "pred")
+spplot(cad_gwr_grid$SDF, "localR2")
+spplot(cad_gwr_grid$SDF, "dist")
+```
+
+
+###################################################################
+```{r}
+# Spatial error
+# Picking a spatial error model 
+# We think that there is an ommitted spatial variable 
+# Something providing spatial structure that we don't have in the model 
+library(spatialreg)
+# instead of lm we are going to use errorsarlm 
+cad_selm <- errorsarlm(cadmium~dist, data=meuse, listw=colW)
+cad_lm
+lm.morantest(cad_selm, colW)
+moran.test(cad_selm$resid, colW)
+moran.test(cad_lm$resid, colW)
+class(cad_selm)
+lm.LMtests(residuals(cad_selm), colW)
+# meuse$cad_selm_resids <- cad_selm$residuals
+# moran.test(meuse$cad_selm_resids, colW)
+```
+
+qs <- quantile(meuse$cad_selm_resids, c(0, 0.02, 0.98, 1))
+tmp_breaks <- seq(0, max(abs(qs[2:3])), len=5)
+breaks <- c(-1 * max(abs(qs[c(1, 4)])), -1 * rev(tmp_breaks[2:length(tmp_breaks)]), tmp_breaks[2:length(tmp_breaks)], max(abs(qs[c(1, 4)])))
+pal <- colorRampPalette(brewer.pal(11, "RdBu"))
+resid_cols <- pal(length(breaks) - 1)
+plot(coordinates(meuse)[,1], coordinates(meuse)[,2], pch=16, cex=5, col=resid_cols[findInterval(meuse$cad_selm_resids, breaks, all.inside=T)])
+legend("topleft", legend=paste(round(breaks, 1)[1:(length(breaks) - 1)], round(breaks, 1)[2:length(breaks)], sep="-"), pch=16, col=resid_cols, title="Cad. SEM Resids")
+
+###################################################################
+```{r}
+# Spatial lag
+# instead of errorsar we are using lagsar here
+# dispersion process is inherent in the variable
+cad_sllm <- lagsarlm(cadmium~dist, data=meuse, listw=colW)
+# lm.morantest(cad_sllm, colW)
+moran.test(cad_sllm$resid, colW)
+moran.test(cad_lm$resid, colW)
+```
+
+lm.LMtests(residuals(cad_sllm), colW)
+meuse$cad_sllm_resids <- cad_sllm$residuals
+moran.test(meuse$cad_sllm_resids, colW)
+summary(cad_sllm)
+
+qs <- quantile(meuse$cad_sllm_resids, c(0, 0.02, 0.98, 1))
+tmp_breaks <- seq(0, max(abs(qs[2:3])), len=5)
+breaks <- c(-1 * max(abs(qs[c(1, 4)])), -1 * rev(tmp_breaks[2:length(tmp_breaks)]), tmp_breaks[2:length(tmp_breaks)], max(abs(qs[c(1, 4)])))
+pal <- colorRampPalette(brewer.pal(11, "RdBu"))
+resid_cols <- pal(length(breaks) - 1)
+plot(coordinates(meuse)[,1], coordinates(meuse)[,2], pch=16, cex=2,  col=resid_cols[findInterval(meuse$cad_sllm_resids, breaks, all.inside=T)])
+legend("topleft", legend=paste(round(breaks, 1)[1:(length(breaks) - 1)], round(breaks, 1)[2:length(breaks)], sep="-"), pch=16, col=resid_cols, title="Cad. OLS Resids")
+
+###################################################################
+# Use the Lagrange multiplier test to help choose (read details in
+# between lag, error, or SARMA models (read details in ?lm.LMtests)
+
+```{r}
+# make an inverse distance weighted matrix then
+# turn it into a listw object:
+w <- 1 / as.matrix(dist(st_coordinates(meuse))^2)
+diag(w) <- 0
+cad_listw <- mat2listw(w)
+```
+
+```{r}
+# fit OLS model and perform Lagrange multiplier test to help
+# select a spatial variant (if one is necessary)
+# cad_lm <- lm(cadmium ~ dist, data = meuse)
+cad_lm <- lm(log(cadmium) ~ dist, data = meuse)
+lm.LMtests(cad_lm, cad_listw, test = "all")
+
+plot(meuse$dist, log(meuse$cadmium))
+```
+
+
+# The lm.LMtests indicate that there is spatial autocorrelation in the OLS
+# residuals that could be handled with a spatial error model (LMlag is not sig).
+# Only one of LMerr and LMlag are significant, so we don't bother to look at the 
+# robust variatns RLMerr and RLMlag, which would be unreliable unless both
+# LMerr and LMlag are significant. If RLMerr and RLMlag also have sig p-values,
+# then we choose the one with the higher test statistic (i.e. RLMerr or RLMlag value)
+cad_selm <- errorsarlm(cadmium ~ dist, data=meuse, listw=cad_listw)
+moran.test(cad_selm$residuals, listw=cad_listw)
+
+# compare the estimated coefficients and their standard errors
+# not only have we underestimated the std. error with the non-spatial
+# version, our estimates are also slightly biased:
+summary(cad_selm)
+summary(cad_lm)
+
+# why do we get a warning in lm.LMtests() above?
+# It's because lm.LMtests() checks for a "style" attribute on the listw
+# object that is not set by mat2listw, but is by nb2listw, for example.
+# Straight from Roger B: https://stat.ethz.ch/pipermail/r-sig-geo/2007-November/002868.html
+# "row standardization": https://support.esri.com/en/other-resources/gis-dictionary/term/d16e7467-f1a7-4cc0-ba18-74a5ef3ee19c
+# compare with:
+# cad_listwW <- nb2listw(cad_listw$neighbours, style="W")
+# lm.LMtests(cad_lm, cad_listwW, test = "all")
+
+
+
+###################################################################
+# This is a fairly common example using boston housing tract data
+# the goal is to estimate the median home value within a tract based on
+# tract-level covariates
+data(boston)
+boston_ols <- lm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2) + I(RM^2) + AGE + log(DIS) + log(RAD) + TAX + PTRATIO + B + log(LSTAT), data=boston.c)
+summary(boston_ols)
+lm.morantest(boston_ols, nb2listw(boston.soi))
+
+data_dir <- "/Volumes/GoogleDrive/My Drive/Teaching/GIS713/GDM_RCodeData/"
+boston_tr <- shapefile(file.path(data_dir, "spData-master/inst/shapes/boston_tracts.shp"))
+# you can get the shapefile here: https://github.com/Nowosad/spData/tree/master/inst/shapes
+# boston_tr <- readShapePoly(system.file("etc/shapes/boston_tracts.shp", package="spdep")[1], ID="poltract", proj4string=CRS(paste("+proj=longlat +datum=NAD27 +no_defs +ellps=clrk66", "+nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat")))
+plot(boston_tr)
+boston_nb <- poly2nb(boston_tr)
+?poly2nb
+boston_nb_rook <- poly2nb(boston_tr, queen=F)
+
+# plot the tracts with their links
+plot(boston_tr)
+# plot(boston_nb, coordinates(boston_tr), add=T, pch=16, cex=0.5, col=2)
+plot(boston_nb, coordinates(boston_tr), add=T, pch=16, cex=0.5, col=2)
+
+# plot the "Rook's rule" version
+plot(boston_tr)
+plot(boston_nb_rook, coordinates(boston_tr), add=T, pch=16, cex=0.5, col=2)
+
+# inference from below model: select spatial error model
+# both robust versions are sig, but the error model is much more sig
+# and has a much higher error statistic
+lm.LMtests(boston_ols, nb2listw(boston_nb_rook), test = "all")
+
+boston_spe <- errorsarlm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2) + I(RM^2) + AGE + log(DIS) + log(RAD) + TAX + PTRATIO + B + log(LSTAT), data=boston.c, nb2listw(boston.soi))
+lm.LMtests(residuals(boston_spe), nb2listw(boston.soi))
+
+summary(boston_spe)
+summary(boston_ols)
+```
+
