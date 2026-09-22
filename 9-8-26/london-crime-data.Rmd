@@ -185,7 +185,7 @@ london_owin <- st_as_sf(london_shp_utm)
   i <- 1
   for(crime_type in unique(london_crime$Crime.type)){
     london_crime_tmp <- london_crime_utm[london_crime_utm$Crime.type == crime_type,]
-    london_crime_tmp <- remove.duplicates(london_crime_tmp)
+    # london_crime_tmp <- remove.duplicates(london_crime_tmp)
     p_tmp <- ppp(x=coordinates(london_crime_tmp)[,1], y=coordinates(london_crime_tmp)[,2], window=london_owin)
     plot(Gest(p_tmp), main=crime_type)
     i <- i + 1

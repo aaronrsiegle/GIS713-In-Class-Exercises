@@ -36,6 +36,12 @@ library(RColorBrewer)
 data(longleaf)
 ```
 
+
+```{r}
+class(longleaf)
+```
+
+
 ```{r}
 #-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 # function to automate K to L conversion 
@@ -159,6 +165,11 @@ fA <- function(x) marks(x) >= 25
 ll_env_toroidal <- envelope(longleaf, Kmulti, I=fJ, J=fA, simulate=expression(rshift(longleaf, group=as.factor(marks(longleaf)<=15), edge="torus")))
 PlotKenvAsL(ll_env_toroidal)
 ```
+```{r}
+print(longleaf)
+```
+
+
 
 ```{r}
 # we can verify that rshift() is doing what we expect, and demonstrate that we could supply
