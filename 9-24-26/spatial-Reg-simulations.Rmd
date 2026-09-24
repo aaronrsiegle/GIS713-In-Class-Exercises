@@ -1,0 +1,81 @@
+---
+title: "SpatialRegSimulations"
+author: "Aaron_Siegle"
+date: "2026-09-24"
+output: html_document
+---
+
+```{r}
+library(sf)
+library(terra)
+library(spatialreg)
+library(spdep)
+library(viridis)
+library(data.table)
+library(spectralGP)
+```
+
+
+```{r}
+SimulateSpatialPattern <- function(grdsz = c(256, 256), ...){
+    # GP - spectral gaussian process 
+    # Simulates a GP on the grid (grdsz) and returns as a raster
+    # see ?spectralGP:::gp for details on parameters
+    my_gp <- gp(gridsize = grdsz, ...)
+    simulate(my_gp)
+    gp_mat <- matrix(my_gp$process, ncol=sqrt(length(my_gp$coeff)))
+    r <- rast(gp_mat)
+    return(r)
+}
+```
+
+```{r}
+# showing the random spatial GP that we created 
+layout(matrix(1:4, nrow=2, byrow=T))
+par(mar=rep(0.5, 4), oma=rep(0, 4))
+plot(SimulateSpatialPattern(),col=viridis(256))
+# showing how the parameters impact the smoothness of the process 
+plot(SimulateSpatialPattern(specdens.param=c(0.5, 0.5)),col=viridis(256))
+plot(SimulateSpatialPattern(specdens.param=c(1,10)),col=viridis(256))
+plot(SimulateSpatialPattern(specdens.param=c(1,1)),col=viridis(256))
+```
+
+```{r}
+r1 <- SimulateSpatialPattern()
+r2 <- SimulateSpatialPattern()
+s <- c(r1, r2) 
+samp <- spatSample(s, size=100, method="random", xy=T, values=T)
+names(samp) <- c("x", "y", "a", "b")
+lm1 <- lm(b~a, data=samp)
+
+```
+
+
+```{r}
+CountSpurious <- function(n=100){
+    s <- c(SimulateSpatialPattern(), SimulateSpatialPattern())
+    mysample <- spatSample(s, size=n, method="random", xy=T, values=T)
+    names(mysample) <- c("x", "y", "z", "x1")
+    dt <- data.table(mysample)
+    lm1 <- lm(z ~ x1, data=dt)
+    pvalue <- summary(lm1)$coef[2,4]
+    if(pvalue < 0.05){
+        return(TRUE)
+    }else{
+        return(FALSE)
+    }
+}
+```
+
+```{r}
+set.seed(42)
+numsims <- 100
+numbadmodels <- 0
+numsamples <- 100
+for(i in 1:numsims){
+    if(CountSpurious(numsamples)) numbadmodels <- numbadmodels + 1
+}
+numbadmodels
+# you are likely to spurriously conclude that there are relationships between random variable if your samples contain points that are very close to each other 
+```
+

@@ -82,9 +82,17 @@ plot(meuse["cad_lm_resids"], breaks="quantile")
 w <- 1 / as.matrix(dist(st_coordinates(meuse)))
 # solving for diagonial points 
 diag(w) <- 0
+# Rho-standardization - wighting the data
+W <- mat2listw(w, style = "W")
 # mat2list - takes the matrix and makes it a list 
 moran.test(meuse$cadmium, mat2listw(w))
 moran.test(residuals(cad_lm), mat2listw(w))
+# We fit the model and we find that there is spatial autocorrelation amongst the variables 
+# the errors are correlated with each other but not correlated with the errors of the dependent variable 
+# Need to look at the p-value from the Rao's Score (Lagrange multipler)
+# Compare the p-values between the error and the lag model - choose the one that is significant 
+# If both are significant than you can test for a robust model - like you did with Jeff 
+
 ```
 
 # a note on why we prefer lm.morantest rather than moran.test:
@@ -258,6 +266,7 @@ summary(cad_lm)
 
 
 ###################################################################
+```{r}
 # This is a fairly common example using boston housing tract data
 # the goal is to estimate the median home value within a tract based on
 # tract-level covariates
@@ -265,15 +274,22 @@ data(boston)
 boston_ols <- lm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2) + I(RM^2) + AGE + log(DIS) + log(RAD) + TAX + PTRATIO + B + log(LSTAT), data=boston.c)
 summary(boston_ols)
 lm.morantest(boston_ols, nb2listw(boston.soi))
-
-data_dir <- "/Volumes/GoogleDrive/My Drive/Teaching/GIS713/GDM_RCodeData/"
-boston_tr <- shapefile(file.path(data_dir, "spData-master/inst/shapes/boston_tracts.shp"))
+# The RStest stops when it hits the first significant p-value 
+lm.RStests(boston_ols, nb2listw(boston.soi))
+```
+```{r}
+data_dir <- "C:/Users/aasie/Downloads/spData-master/spData-master/data"
+boston_tr <- st_read(file.path(data_dir, "boston/boston_tracts.shp"))
 # you can get the shapefile here: https://github.com/Nowosad/spData/tree/master/inst/shapes
 # boston_tr <- readShapePoly(system.file("etc/shapes/boston_tracts.shp", package="spdep")[1], ID="poltract", proj4string=CRS(paste("+proj=longlat +datum=NAD27 +no_defs +ellps=clrk66", "+nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat")))
 plot(boston_tr)
+# polygon to neighbor list 
+# Rook definition - need to share at least two corner points to be neighbors
+# Queen defintion - need to share at least one corner point to be a neighbor 
 boston_nb <- poly2nb(boston_tr)
 ?poly2nb
 boston_nb_rook <- poly2nb(boston_tr, queen=F)
+```
 
 # plot the tracts with their links
 plot(boston_tr)
@@ -284,10 +300,13 @@ plot(boston_nb, coordinates(boston_tr), add=T, pch=16, cex=0.5, col=2)
 plot(boston_tr)
 plot(boston_nb_rook, coordinates(boston_tr), add=T, pch=16, cex=0.5, col=2)
 
+```{r}
 # inference from below model: select spatial error model
 # both robust versions are sig, but the error model is much more sig
 # and has a much higher error statistic
+# Spirrously concluded with the linear model that additional variables would help when they actually would not 
 lm.LMtests(boston_ols, nb2listw(boston_nb_rook), test = "all")
+```
 
 boston_spe <- errorsarlm(log(MEDV) ~ CRIM + ZN + INDUS + CHAS + I(NOX^2) + I(RM^2) + AGE + log(DIS) + log(RAD) + TAX + PTRATIO + B + log(LSTAT), data=boston.c, nb2listw(boston.soi))
 lm.LMtests(residuals(boston_spe), nb2listw(boston.soi))
