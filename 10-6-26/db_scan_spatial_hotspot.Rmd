@@ -1,0 +1,89 @@
+---
+title: "DBSCAN_spatial_hotspot"
+author: "Aaron_Siegle"
+date: "2026-10-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+###############################################################################
+# DBSCAN Spatial Hotspot and Noise Extraction
+###############################################################################
+```{r}
+library(dbscan)
+library(factoextra)
+library(ggplot2)
+```
+
+
+```{r}
+# Generate synthetic spatial coordinate observations
+set.seed(42)
+n_core_pts <- 300
+cluster1 <- data.frame(x = rnorm(n_core_pts/2, mean = 2, sd = 0.3), y = rnorm(n_core_pts/2, mean = 2, sd = 0.3))
+cluster2 <- data.frame(x = rnorm(n_core_pts/2, mean = 6, sd = 0.5), y = rnorm(n_core_pts/2, mean = 5, sd = 0.4))
+spatial_noise <- data.frame(x = runif(40, 0, 8), y = runif(40, 0, 8))
+
+spatial_df <- rbind(cluster1, cluster2, spatial_noise)
+```
+
+
+```{r}
+# 1. Determine Optimal Epsilon using 4-NN Distance Knee Plot
+minPts_val <- 4
+kNNdistplot(spatial_df, k = minPts_val)
+abline(h = 0.45, col = "red", lty = 2)
+```
+
+```{r}
+# 2. Fit DBSCAN Algorithm
+# Very simple to run DBSCAN
+db_res <- dbscan(spatial_df, eps = 0.45, minPts = minPts_val)
+print(db_res)
+# Cluster 0 is the noise cluster - points that don't fit in the actual datasets
+```
+```{r}
+# 3. Analyze Noise Points vs. Cluster 
+# want it to be treated  as a number as opposed to a factor 
+spatial_df$cluster <- as.factor(db_res$cluster)
+cat("Extracted Spatial Clusters:", max(db_res$cluster), "\n")
+cat("Isolated Spatial Noise Points:", sum(db_res$cluster == 0), "\n")
+```
+
+```{r}
+# 4. Visualize DBSCAN Results
+fviz_cluster(
+  db_res, 
+  data = spatial_df[, c("x", "y")],
+  stand = FALSE,
+  ellipse = FALSE,
+  show.clust.cent = FALSE,
+  geom = "point",
+  palette = "jco",
+  ggtheme = theme_bw(),
+  main = "DBSCAN Spatial Hotspots and Outlier Isolation")
+```
+

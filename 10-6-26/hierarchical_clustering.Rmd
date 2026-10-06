@@ -1,0 +1,139 @@
+---
+title: "hierarchial_clustering"
+author: "Aaron_Siegle"
+date: "2026-10-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+###############################################################################
+# Hierarchical Clustering Workflow: Multi-Attribute Spatial Data
+###############################################################################
+```{r}
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(data.table)
+```
+```{r}
+# Load synthetic census-tract socio-economic dataset
+set.seed(713)
+n_tracts <- 150
+spatial_socioeco <- data.table(
+  tract_id = paste0("TRACT_", 1000 + 1:n_tracts),
+  med_income = rnorm(n_tracts, mean = 65000, sd = 15000),
+  pct_college = runif(n_tracts, 10, 65),
+  housing_density = rweibull(n_tracts, shape = 2, scale = 1200),
+  transit_score = rbeta(n_tracts, 2, 5) * 100
+)
+```
+
+
+```{r}
+# Extract feature matrix and scale attributes
+# pulling everything except for the tract id out of the spatial data frame 
+feature_matrix <- as.matrix(spatial_socioeco[, .(med_income, pct_college, housing_density, transit_score)])
+rownames(feature_matrix) <- spatial_socioeco$tract_id
+scaled_features <- scale(feature_matrix)
+```
+
+```{r}
+# 1. Compute Pairwise Euclidean Dissimilarity Matrix
+# compute distances on the scaled features
+dist_euclidean <- dist(scaled_features, method = "euclidean")
+diag(dist_euclidean)
+```
+
+```{r}
+# 2. Evaluate Agglomerative Coefficients across Linkage Methods
+# Agnes is the agglomerative clustering 
+linkage_methods <- c("single", "complete", "average", "ward")
+ac_results <- sapply(linkage_methods, function(m) {
+  agnes(scaled_features, method = m)$ac
+})
+print("Agglomerative Coefficients across Linkage Algorithms:")
+print(ac_results)
+# The agglomerative coefficient tells us how well things are clustered together 
+```
+
+```{r}
+# 3. Fit AGNES with Ward's Method and DIANA Divisive Clustering
+hc_ward <- agnes(scaled_features, method = "ward")
+hc_divisive <- diana(scaled_features)
+```
+
+```{r}
+# 4. Tanglegram Comparison between Complete Linkage and Ward's Method
+dend_complete <- as.dendrogram(hclust(dist_euclidean, method = "complete"))
+dend_ward <- as.dendrogram(as.hclust(hc_ward))
+```
+
+```{r}
+# Compute Entanglement
+entang_val <- entanglement(dend_complete, dend_ward)
+cat("Dendrogram Entanglement (Complete vs. Ward):", round(entang_val, 4), "\n")
+```
+
+```{r}
+# Plot Tanglegram
+tanglegram(
+  untangle(dend_complete, dend_ward),
+  main_left = "Complete Linkage",
+  main_right = "Ward's Method",
+  highlight_distinct_edges = TRUE,
+  common_subtrees_color_lines = TRUE,
+  lwd = 1.2
+)
+```
+```{r}
+# 5. Optimal Cluster Selection via Silhouette and Gap Statistic
+p1 <- fviz_nbclust(scaled_features, FUN = hcut, method = "silhouette") +
+  labs(title = "Optimal k: Average Silhouette Width")
+print(p1)
+```
+
+```{r}
+# Cluster gaps
+gap_stat <- clusGap(scaled_features, FUN = hcut, nstart = 25, K.max = 10, B = 50)
+p2 <- fviz_gap_stat(gap_stat) +
+  labs(title = "Optimal k: Monte Carlo Gap Statistic")
+print(p2)
+```
+
+```{r}
+# Cut Tree at k = 4 and Visualize Spatial Profiles
+cluster_assignments <- cutree(as.hclust(hc_ward), k = 4)
+spatial_socioeco[, cluster_ward := cluster_assignments]
+
+fviz_cluster(
+  list(data = scaled_features, cluster = cluster_assignments),
+  ellipse.type = "convex",
+  repel = TRUE,
+  show.clust.cent = TRUE,
+  ggtheme = theme_minimal(),
+  main = "Multi-Attribute Spatial Census Clusters (Ward's AGNES)"
+)
+```

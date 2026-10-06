@@ -1,0 +1,250 @@
+---
+title: "spatial_clustering_simulation"
+author: "Aaron_Siegle"
+date: "2026-10-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+###############################################################################
+# PhD Dissertation Case Study: "Soup to Nuts" Spatial Data Mining Pipeline
+# Script: PhD_Spatial_Clustering_Simulation.R
+###############################################################################
+
+```{r}
+# Load required packages
+suppressPackageStartupMessages({
+  library(data.table)
+  library(dbscan)
+  library(cluster)
+  library(factoextra)
+  library(ggplot2)
+  library(viridis)
+  library(dendextend)
+})
+```
+
+```{r}
+# Set seed for complete scientific reproducibility
+set.seed(2026)
+```
+
+
+```{r}
+#==============================================================================
+# STEP 1: Synthetic Spatial Coordinate and Covariate Simulation
+#==============================================================================
+cat("--- STEP 1: Simulating Complex Geospatial Features ---\n")
+
+# Geometry A: Crescent / Arc Structure (Non-convex spatial corridor, N = 400)
+theta <- runif(400, 0, pi)
+r <- 3.5 + rnorm(400, mean = 0, sd = 0.15)
+arc_x <- r * cos(theta) + 5
+arc_y <- r * sin(theta) + 5
+crescent_data <- data.table(x = arc_x, y = arc_y, true_entity = "Arc_Corridor")
+```
+```{r}
+# Geometry B: Dense Gaussian Environmental Core (Spherical, N = 250)
+core_x <- rnorm(250, mean = 5, sd = 0.4)
+core_y <- rnorm(250, mean = 3.5, sd = 0.4)
+gaussian_data <- data.table(x = core_x, y = core_y, true_entity = "Dense_Core")
+
+# Geometry C: Diffuse Background Environmental Noise (Uniform Spatial Noise, N = 75)
+noise_x <- runif(75, min = 0, max = 10)
+noise_y <- runif(75, min = 0, max = 9)
+noise_data <- data.table(x = noise_x, y = noise_y, true_entity = "Background_Noise")
+
+# Combine synthetic dataset
+sim_spatial <- rbind(crescent_data, gaussian_data, noise_data)
+sim_spatial[, point_id := 1:.N]
+
+cat(sprintf("Simulated %d spatial points across 3 distinct topological structures.\n", nrow(sim_spatial)))
+```
+
+```{r}
+# Plot raw spatial coordinate distribution
+ggplot(sim_spatial, aes(x = x, y = y, color = true_entity)) +
+  geom_point(alpha = 0.8, size = 2) +
+  scale_color_manual(values = c("Arc_Corridor" = "#2E86C1", "Dense_Core" = "#28B463", "Background_Noise" = "#E74C3C")) +
+  labs(title = "Simulated Spatial Data",
+       subtitle = "Complex Geometry: Non-Convex Crescent + Gaussian Core + Uniform Noise",
+       x = "X Coordinate (km)", y = "Y Coordinate (km)", color = "Ground Truth Geometry") +
+  theme_minimal()
+```
+
+```{r}
+#==============================================================================
+# STEP 2: Spatial Feature Scaling and Distance Matrix Formulation
+#==============================================================================
+cat("\n--- STEP 2: Preprocessing and Distance Matrix Computation ---\n")
+
+spatial_coords <- as.matrix(sim_spatial[, .(x, y)])
+scaled_coords <- scale(spatial_coords)
+
+# Compute Pairwise Euclidean Distance Matrix
+spatial_dist <- dist(scaled_coords, method = "euclidean")
+```
+
+```{r}
+#==============================================================================
+# STEP 3: k-NN Knee Plot Diagnostic & DBSCAN Calibration
+#==============================================================================
+cat("\n--- STEP 3: DBSCAN Parameter Calibration via k-NN Plot ---\n")
+
+# Spatial dimension d = 2 -> Baseline minPts = 4 (increased to 5 for noise robustness)
+# choosing the min points and epsilon 
+target_minPts <- 5
+kNNdistplot(scaled_coords, k = target_minPts)
+abline(h=0.15, lty=2)
+```
+
+```{r}
+# Find Knee Point programmatically via max distance from chord line
+knn_distances <- kNNdist(scaled_coords, k = target_minPts)
+sorted_knn <- sort(knn_distances)
+n_points <- length(sorted_knn)
+x1 <- 1; y1 <- sorted_knn[1]
+x2 <- n_points; y2 <- sorted_knn[n_points]
+```
+
+```{r}
+# Line distance calculation
+a <- y2 - y1
+b <- x1 - x2
+c <- x2 * y1 - x1 * y2
+distances_to_line <- abs(a * (1:n_points) + b * sorted_knn + c) / sqrt(a^2 + b^2)
+knee_index <- which.max(distances_to_line)
+optimal_eps <- sorted_knn[knee_index]
+
+
+cat(sprintf("Automated k-NN Knee Diagnostic: Optimal Epsilon = %.4f (at minPts = %d)\n", optimal_eps, target_minPts))
+```
+
+```{r}
+# Fit DBSCAN
+dbscan_fit <- dbscan(scaled_coords, eps = optimal_eps, minPts = target_minPts)
+sim_spatial[, dbscan_cluster := dbscan_fit$cluster]
+
+cat(sprintf("DBSCAN Execution Results: %d Clusters Identified, %d Noise Points Isolated.\n",
+            max(dbscan_fit$cluster), sum(dbscan_fit$cluster == 0)))
+
+ggplot(sim_spatial, aes(x, y, color = as.factor(dbscan_cluster), shape = dbscan_cluster == 0)) +
+  geom_point(size = 1.8) + scale_shape_manual(values = c(16, 4)) +
+  labs(title = "DBSCAN (Arbitrary Geometry + Noise Isolation)") + theme_bw()
+```
+
+```{r}
+#==============================================================================
+# STEP 4: Agglomerative Hierarchical Profiling and Cut-Tree Analysis
+#==============================================================================
+cat("\n--- STEP 4: Agglomerative Hierarchical Clustering (AGNES) ---\n")
+
+# Fit AGNES with Ward's linkage
+agnes_ward <- agnes(scaled_coords, method = "ward")
+cat(sprintf("AGNES Agglomerative Coefficient (Ward's Method): %.4f\n", agnes_ward$ac))
+```
+
+```{r}
+# Cut hierarchical tree at k = 3 (expecting 2 main clusters + noise)
+hier_clusters_k3 <- cutree(as.hclust(agnes_ward), k = 3)
+# This is hierarchical cluster assignment to determine where you cut the tree
+sim_spatial[, hier_cluster := hier_clusters_k3]
+```
+
+```{r}
+# Fit k-means as baseline model for comparison
+set.seed(2026)
+kmeans_fit <- kmeans(scaled_coords, centers = 3, nstart = 25)
+sim_spatial[, kmeans_cluster := kmeans_fit$cluster]
+```
+
+
+```{r}
+#==============================================================================
+# STEP 5: Comparative Model Evaluation
+#==============================================================================
+cat("\n--- STEP 5: Comparative Evaluation Across Spatial Algorithms ---\n")
+
+# Compute Silhouette Widths
+sil_kmeans <- silhouette(kmeans_fit$cluster, spatial_dist)
+sil_hier <- silhouette(hier_clusters_k3, spatial_dist)
+
+# DBSCAN Silhouette (excluding noise points label = 0)
+non_noise_idx <- which(dbscan_fit$cluster > 0)
+if (length(non_noise_idx) > 0) {
+  sil_dbscan <- silhouette(dbscan_fit$cluster[non_noise_idx], dist(scaled_coords[non_noise_idx, ]))
+  avg_sil_dbscan <- mean(sil_dbscan[, 3])
+} else {
+  avg_sil_dbscan <- NA
+}
+
+avg_sil_kmeans <- mean(sil_kmeans[, 3])
+avg_sil_hier <- mean(sil_hier[, 3])
+
+cat("\n===================================================================\n")
+cat("           SPATIAL ALGORITHM BENCHMARK SUMMARY TABLE\n")
+cat("===================================================================\n")
+cat(sprintf("Algorithm      | Clusters Found | Noise Isolated | Avg Silhouette Width\n"))
+cat("-------------------------------------------------------------------\n")
+cat(sprintf("k-Means (k=3)  | 3              | 0              | %.4f\n", avg_sil_kmeans))
+cat(sprintf("AGNES (Ward k=3)| 3              | 0              | %.4f\n", avg_sil_hier))
+cat(sprintf("DBSCAN (eps=%.2f)| %-14d | %-14d | %.4f\n", 
+            optimal_eps, max(dbscan_fit$cluster), sum(dbscan_fit$cluster == 0), avg_sil_dbscan))
+cat("===================================================================\n")
+```
+# the lower values are better for the silhoutte 
+
+
+```{r}
+# Visual comparison of spatial cluster partitioning
+p_ground <- ggplot(sim_spatial, aes(x, y, color = true_entity)) +
+  geom_point(size = 1.8) + labs(title = "Ground Truth Geometries") + theme_bw()
+print(p_ground)
+```
+
+```{r}
+p_km <- ggplot(sim_spatial, aes(x, y, color = as.factor(kmeans_cluster))) +
+  geom_point(size = 1.8) + labs(title = "k-Means (Forced Spherical Boundaries)") + theme_bw()
+print(p_km)
+```
+
+```{r}
+p_hc <- ggplot(sim_spatial, aes(x, y, color = as.factor(hier_cluster))) +
+  geom_point(size = 1.8) + labs(title = "Hierarchical AGNES (Ward's Linkage)") + theme_bw()
+print(p_hc)
+
+# Remember that Agnes is only working off the (x,y) distances so it can't capture the strutures of the clusters in the dataset 
+# it can't handle local density 
+```
+```{r}
+p_db <- ggplot(sim_spatial, aes(x, y, color = as.factor(dbscan_cluster), shape = dbscan_cluster == 0)) +
+  geom_point(size = 1.8) + scale_shape_manual(values = c(16, 4)) +
+  labs(title = "DBSCAN (Arbitrary Geometry + Noise Isolation)") + theme_bw()
+
+
+# Print DBSCAN spatial plot
+print(p_db)
+```
