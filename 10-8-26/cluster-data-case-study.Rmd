@@ -1,0 +1,311 @@
+---
+title: "cluster-case-study"
+author: "Aaron_Siegle"
+date: "2026-10-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+library(sf)          # Spatial vector features
+library(cluster)     # Hierarchical clustering (AGNES)
+library(dendextend)  # Dendrogram untangling & entanglement metrics
+library(ggplot2)     # Spatial visualization
+library(gridExtra)   # Multi-panel layouts
+```
+
+```{r}
+generate_city_data <- function(city_name, n_tracts = 80, policy_type = "exclusionary") {
+  
+  # Generate projected coordinates (UTM Zone 17N meters)
+  # for a 20km x 20km city
+  x_base <- ifelse(city_name == "Simpsonville", 500000, 550000)
+  y_base <- 4000000
+  
+  x_coords <- runif(
+    n_tracts,
+    min = x_base,
+    max = x_base + 20000
+  )
+  
+  y_coords <- runif(
+    n_tracts,
+    min = y_base,
+    max = y_base + 20000
+  )
+  
+  # Create initial tract data frame
+  tracts_df <- data.frame(
+    city = city_name,
+    tract_id = sprintf(
+      "%s_T%03d",
+      substr(city_name, 1, 3),
+      1:n_tracts
+    ),
+    easting = x_coords,
+    northing = y_coords
+  )
+  
+  # Geographic gradient vector
+  # (Southwest to Northeast axis)
+  spatial_gradient <- 
+    (x_coords - x_base) / 20000 + 
+    (y_coords - y_base) / 20000
+  
+  spatial_gradient_norm <- 
+    (spatial_gradient - min(spatial_gradient)) /
+    (max(spatial_gradient) - min(spatial_gradient))
+  
+  # Generate socioeconomic variables
+  if (policy_type == "exclusionary") {
+    
+    # SIMPSONVILLE:
+    # Socioeconomics strictly follow geography
+    # (Macro-Segregation)
+    
+    income_base <- 
+      30000 + 
+      75000 * spatial_gradient_norm + 
+      rnorm(n_tracts, 0, 3000)
+    
+    college_base <- 
+      10 + 
+      65 * spatial_gradient_norm + 
+      rnorm(n_tracts, 0, 2.5)
+    
+    unemp_base <- 
+      14 - 
+      10 * spatial_gradient_norm + 
+      rnorm(n_tracts, 0, 0.8)
+    
+    rent_burden <- 
+      60 - 
+      35 * spatial_gradient_norm + 
+      rnorm(n_tracts, 0, 1.8)
+    
+  } else if (policy_type == "inclusionary") {
+    
+    # SPRINGFIELD:
+    # Mixed-income housing policy decouples
+    # socioeconomic status from location
+    
+    random_noise <- runif(n_tracts, 0, 1)
+    
+    income_base <- 
+      35000 + 
+      20000 * spatial_gradient_norm + 
+      50000 * random_noise
+    
+    college_base <- 
+      15 + 
+      15 * spatial_gradient_norm + 
+      45 * random_noise
+    
+    unemp_base <- 
+      12 - 
+      3 * spatial_gradient_norm - 
+      7 * random_noise
+    
+    rent_burden <- 
+      55 - 
+      10 * spatial_gradient_norm - 
+      25 * random_noise
+  }
+  
+  # Format Census variables
+  tracts_df$med_income <- 
+    round(pmax(18000, income_base), 0)
+  
+  tracts_df$pct_college <- 
+    round(pmin(92, pmax(3, college_base)), 1)
+  
+  tracts_df$pct_unemp <- 
+    round(pmin(25, pmax(1, unemp_base)), 1)
+  
+  tracts_df$pct_rent_burden <- 
+    round(pmin(75, pmax(12, rent_burden)), 1)
+  
+  # Convert to sf object
+  sf_city <- st_as_sf(
+    tracts_df,
+    coords = c("easting", "northing"),
+    crs = 32617
+  )
+  
+  return(sf_city)
+}
+```
+
+
+
+```{r}
+simpsonville <- generate_city_data(
+  "Simpsonville",
+  policy_type = "exclusionary"
+)
+
+head(simpsonville)
+```
+
+```{r}
+springfield <- generate_city_data(
+  "Springfield",
+  policy_type = "inclusionary"
+)
+
+head(springfield)
+
+```
+
+
+
+```{r}  
+# simulating fake data to model the theoretical income differences beased on the housing policies in Springfield and Simsponsville
+  # Geographic gradient vector (Southwest to Northeast axis)
+  spatial_gradient <- (x_coords - x_base)/20000 + (y_coords - y_base)/20000
+  spatial_gradient_norm <- (spatial_gradient - min(spatial_gradient)) / 
+                           (max(spatial_gradient) - min(spatial_gradient))
+  
+  if (policy_type == "exclusionary") {
+    # SIMPSONVILLE: Socioeconomics strictly follow geography (Macro-Segregation)
+    # High signal, low random spatial noise
+    income_base    <- 30000 + 75000 * spatial_gradient_norm + rnorm(n_tracts, 0, 3000)
+    college_base   <- 10 + 65 * spatial_gradient_norm + rnorm(n_tracts, 0, 2.5)
+    unemp_base     <- 14 - 10 * spatial_gradient_norm + rnorm(n_tracts, 0, 0.8)
+    rent_burden    <- 60 - 35 * spatial_gradient_norm + rnorm(n_tracts, 0, 1.8)
+    
+  } else if (policy_type == "inclusionary") {
+    # SPRINGFIELD: Mixed-income housing policy decouples SES from location
+    # Low spatial gradient dependence, high localized micro-variance
+    random_noise <- runif(n_tracts, 0, 1)
+    
+    income_base    <- 35000 + 20000 * spatial_gradient_norm + 50000 * random_noise
+    college_base   <- 15 + 15 * spatial_gradient_norm + 45 * random_noise
+    unemp_base     <- 12 - 3 * spatial_gradient_norm - 7 * random_noise
+    rent_burden    <- 55 - 10 * spatial_gradient_norm - 25 * random_noise
+  }
+  
+  # Format Census variables
+  tracts_df$med_income      <- round(pmax(18000, income_base), 0)
+  tracts_df$pct_college     <- round(pmin(92, pmax(3, college_base)), 1)
+  tracts_df$pct_unemp       <- round(pmin(25, pmax(1, unemp_base)), 1)
+  tracts_df$pct_rent_burden <- round(pmin(75, pmax(12, rent_burden)), 1)
+  
+  # Convert to simple features sf object
+  sf_city <- st_as_sf(tracts_df, coords = c("easting", "northing"), crs = 32617)
+  return(sf_city)
+}
+```
+
+```{r}
+# Generate synthetic datasets for both policy regimes
+simpsonville_sf <- generate_city_data("Simpsonville", n_tracts = 80, policy_type = "exclusionary")
+springfield_sf  <- generate_city_data("Springfield",  n_tracts = 80, policy_type = "inclusionary")
+```
+
+```{r}
+names(springfield_sf)
+springfield_sp_dist <- dist(st_coordinates(springfield_sf))
+simsponsville_sp_dist <- dist(st_coordinates(simpsonville_sf))
+```
+
+```{r}
+# Compute hierarchical cluster for cities 
+springfield_sp_agnes <- agnes(simpsonsville_sp_dist, method = "ward")
+simsponsville_sp_agnes <- agnes(springfield_sp_dist, method = "ward")
+```
+
+```{r}
+dend_simp <- as.dendogram(as.hclust(springfield_sp_agnes))
+dend_spring <- as.dendogram(as.hclust(simpsonville_sp_agnes))
+```
+# Compute SES clustering 
+```{r}
+names(simpsonville_sf)
+simpsonville_ses <- as.matrix(st_drop_geometry(simpsonville_sf)[, c("med_income"), "pct_college", "pct_unemp", "pct_rent_burden"])
+simpsonville_ses <- scale(simpsonville_ses)
+simpsonville_ses <- dist(simpsonville_ses)
+```
+
+```{r}
+names(springfield_sf)
+springfield_ses <- as.matrix(st_drop_geometry(springfield_sf)[, c("med_income"), "pct_college", "pct_unemp", "pct_rent_burden"])
+springfield_ses <- scale(springfield_ses)
+```
+
+
+```{r}
+dend_springfield_sp <- as.dendrogram(as.hclust(springfield_sp_agnes), na.rm=T)
+dend_springfield_ses <- as.dendrogram(as.hclust(springfield_sp_agnes), na.rm="ward")
+```
+
+```{r}
+dend_simpsonville_sp <- as.dendrogram(as.hclust(simpsonville_sp_agnes), na.rm="ward")
+dend_simpsonville_ses <- as.dendrogram(as.hclust(simpsonville_sp_agnes), na.rm="ward")
+```
+
+
+```{r}
+entang_val_springfield <- entanglement(untangle(springfield_ses_agnes, springfield_sp_agnes))
+entang_val_simpsonville <- entanglement(untangle(springfield_ses_agnes, simpsonville_sp_agnes))
+```
+
+
+```{r}
+ # Plot Tanglegram
+tanglegram(
+  untangle(dend_simpsonville_sp, dend_simpsonville_se),
+  main_left = "Complete Linkage",
+  main_right = "Ward's Method",
+  highlight_distinct_edges = TRUE,
+  common_subtrees_color_lines = TRUE,
+  lwd = 1.2
+  
+tanglegram(
+  untangle(dend_springfield_sp, dend_springfield_ses),
+  main_left = "Complete Linkage",
+  main_right = "Ward's Method",
+  highlight_distinct_edges = TRUE,
+  common_subtrees_color_lines = TRUE,
+  lwd = 1.2
+```
+
+```{r}
+entang_val <- entanglement(untangle(dend_simp, dend_spring),
+                           highlight_distinct_edges = TRUE, 
+                           common_subtrees_color_lines = TRUE, 
+                           lwd = 1.2)
+```
+
+
+
+```{r}
+linkage_methods <- c("single", "average", "ward")
+ac_results <- sapply(linkage_methods, function(m) {
+  agnes(simsponsville_sp_dist, method = m)$ac
+})
+```
+
